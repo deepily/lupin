@@ -291,3 +291,44 @@ def test_the_sample_file_is_on_disk_before_the_first_model_call_arrives( world )
         return model( prompt, options )
     arm.main( [ "--archive", world[ "archive" ], "--records", world[ "records" ], "--work-dir", world[ "work" ], "--sample", "2", "--seed", "5" ], query_fn=watching, out=lambda line: None )
     assert seen and all( seen ), "the ids and seed are written down before any call, so a crashed run still leaves them"
+
+
+def test_each_scored_row_carries_the_answer_split_read_from_its_card( world ):
+    run( world )
+    rows = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.OUT_NAME ) ) ]
+    assert [ ( row[ "scorable" ], row[ "write_in" ] ) for row in rows ] == [ ( True, False ) ] * 4, "the Note field lists no options, so it is never a write-in"
+
+
+def _mc_row( correct, scorable, write_in ):
+    """One scored multiple-choice row of the shape score_rows writes."""
+    return { "response_type": "multiple_choice", "title": "Pick", "forecast": { "answers": {} }, "reason": None, "correct": correct, "old_correct": False,
+             "scorable": scorable, "write_in": write_in }
+
+
+def test_a_line_gives_multiple_choice_right_over_scorable_and_the_table_prints_it_under_the_all_cards_figure():
+    rows  = [ _mc_row( True, True, False ), _mc_row( False, True, True ), _mc_row( False, False, True ),
+              { "response_type": "yes_no", "title": "Ship it?", "forecast": { "value": "yes" }, "reason": None, "correct": True, "old_correct": True, "scorable": True, "write_in": False } ]
+    lines = arm.summarize( rows )
+    assert lines[ 0 ][ "correct" ] == 2 and lines[ 0 ][ "multiple_choice" ] == { "cards": 3, "scorable": 2, "unscored": 1, "right": 1, "unscored_right": 0,
+                                                                                "correct_all_cards": 1, "accuracy_scorable": 0.5, "accuracy_all_cards": 1 / 3,
+                                                                                "write_in_cards": 2, "write_in_rate": 2 / 3 }
+    text  = arm.render( lines ).splitlines()
+    assert text[ 1 ].split()[ :4 ] == [ "all", "4", "4", "2" ], "the correct column keeps the all-cards figure"
+    assert text[ 2 ].strip() == "multiple choice: right 1 of 2 scorable, unscored 1 of 3, write-in cards 2 of 3, unscored right 0"
+    assert [ one.split()[ 0 ] for one in text ] == [ "group", "all", "multiple", "multiple_choice", "multiple", "yes_no", "stop-hook" ], \
+        "a line with no multiple-choice cards prints no split line"
+
+
+@pytest.mark.parametrize( "answers, split", [
+    ( { "Plan": "neither, ask me later", "Extras": [ "Docs" ], "Note": "ship it soon" }, ( True, True ) ),
+    ( { "Plan": "neither, ask me later", "Extras": [ "my own pick" ], "Note": "ship it soon" }, ( False, True ) ),
+] )
+def test_a_card_with_a_typed_write_in_is_marked_and_one_with_every_option_field_typed_is_unscorable( world, answers, split ):
+    engine = create_engine( f"sqlite:///{world[ 'archive' ]}" )
+    with Session( engine ) as db:
+        db.get( Notification, world[ "cards" ][ 2 ][ "id" ] ).response_value = { "value": json.dumps( { "answers": answers } ), "source": "ui" }
+        db.commit()
+    engine.dispose()
+    run( world )
+    rows = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.OUT_NAME ) ) ]
+    assert ( rows[ 2 ][ "scorable" ], rows[ 2 ][ "write_in" ] ) == split and rows[ 2 ][ "correct" ] is False

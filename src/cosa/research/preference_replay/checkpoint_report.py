@@ -77,6 +77,23 @@ def label_metrics( actual: Sequence[str], predicted: Sequence[str], labels: Sequ
     }
 
 
+def _scorable_cells( score ):
+    """
+    Write one type's scorable count and its correct per 100 over scorable asks.
+
+    Requires:
+        - score is one window's score for one type, from before_after_columns._scores
+
+    Ensures:
+        - returns "scorable | rate", the rate being correct_scorable over scorable, n/a when no ask is scorable
+        - a score with no scorable count (a column written before 27 Nov 2026 has no key, a run over older records holds None)
+          gives "not recorded | not recorded"
+    """
+    if "scorable" not in score or score[ "scorable" ] is None: return "not recorded | not recorded"
+    rate = f"{100.0 * score[ 'correct_scorable' ] / score[ 'scorable' ]:.1f}" if score[ "scorable" ] > 0 else "n/a"
+    return f"{score[ 'scorable' ]} | {rate}"
+
+
 def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dict[str, int], calibration: Dict,
                    findings: List[Dict[str, str]], cohort_sha256: str, settings_commit: str, cohort_ids: Sequence[str],
                    retune: Optional[Dict[str, Any]] = None, sweep_points: Optional[List[Dict[str, Any]]] = None,
@@ -122,12 +139,16 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
             mix    = coverage[ f"{window}_mix" ]
             lines.append( f"| {window} | " + " | ".join( str( mix.get( kind, 0 ) ) for kind in kinds ) + f" | {sum( mix.values() )} |" )
         if "scores" in coverage:
-            lines += [ "", "Predictor score by answer type, in each window:", "", "| window | type | asks | correct | correct per 100 |", "|---|---|---|---|---|" ]
+            lines += [ "", "Predictor score by answer type, in each window:", "",
+                       "Correct per 100 counts every ask, an unscorable one as a miss, as before 27 Nov 2026; the last two columns count only the asks"
+                       " whose answer can be scored.", "",
+                       "| window | type | asks | correct | correct per 100 | scorable | correct per 100 scorable |", "|---|---|---|---|---|---|---|" ]
             for window in ( "tune", "final" ):
                 for kind in kinds:
-                    asks, correct = coverage[ "scores" ][ window ][ kind ][ "asks" ], coverage[ "scores" ][ window ][ kind ][ "correct" ]
+                    score         = coverage[ "scores" ][ window ][ kind ]
+                    asks, correct = score[ "asks" ], score[ "correct" ]
                     rate = f"{100.0 * correct / asks:.1f}" if asks > 0 else "n/a"
-                    lines.append( f"| {window} | {kind} | {asks} | {correct} | {rate} |" )
+                    lines.append( f"| {window} | {kind} | {asks} | {correct} | {rate} | {_scorable_cells( score )} |" )
         lines.append( "" )
     for name, rule in deferral( final_window_asks ).items():
         lines += [ f"## {name}", "", f"Eligible final-window asks: {rule[ 'asks' ]}. " +

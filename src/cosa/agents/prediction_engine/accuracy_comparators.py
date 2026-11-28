@@ -324,6 +324,23 @@ def predicted_answers_of( predicted ):
     return answers
 
 
+def schema_questions( response_options ):
+    """
+    Read the field list of a stored multiple-choice schema, or say it is malformed.
+
+    Requires:
+        - response_options is anything: a stored schema, None, or a value of any other type
+
+    Ensures:
+        - returns the "questions" list when response_options is a dict whose "questions" is a list of dicts that each
+          carry a string "header"; a dict with no "questions" key gives an empty list
+        - returns None for anything else, the case compare_multiple_choice reports as "malformed_schema"
+    """
+    questions = response_options.get( "questions", [] ) if isinstance( response_options, dict ) else None
+    if not isinstance( questions, list ) or not all( isinstance( q, dict ) and isinstance( q.get( "header" ), str ) for q in questions ): return None
+    return questions
+
+
 def compare_multiple_choice( predicted, actual, response_options, per_field=False ):
     """
     Score a multiple-choice card field by field, by the schema stored with the notification.
@@ -362,8 +379,8 @@ def compare_multiple_choice( predicted, actual, response_options, per_field=Fals
     if not predicted_answers or not actual_answers:
         return ( None, { "reason": "empty_answers" } )
 
-    questions = response_options.get( "questions", [] ) if isinstance( response_options, dict ) else None
-    malformed = not isinstance( questions, list ) or not all( isinstance( q, dict ) and isinstance( q.get( "header" ), str ) for q in questions )
+    questions = schema_questions( response_options )
+    malformed = questions is None
     schemas   = {} if malformed else { q[ "header" ]: q for q in questions }
     fields  = [
         score_field( schemas.get( header, { "header": header } ), predicted_answers.get( header ), value, per_field=per_field )

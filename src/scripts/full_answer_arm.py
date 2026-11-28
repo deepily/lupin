@@ -30,11 +30,12 @@ from sqlalchemy.pool import StaticPool
 
 import cosa.research.preference_replay.scratch_db  # noqa: F401  registers the SQLite hooks for JSONB and Vector
 from cosa.agents.prediction_engine import context_baseline, full_answer
+from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE
 from cosa.agents.prediction_engine.principles_forecast import CapGate
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.db import schema_drift
 from cosa.research.preference_replay.archive_replay import locked_sessions, read_jsonl
-from cosa.research.preference_replay.replay_loop import _score
+from cosa.research.preference_replay.replay_loop import _score, answer_split, multiple_choice_split
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog
 
 WORKERS         = 2
@@ -208,8 +209,9 @@ def score_rows( factory, records ):
         - records are run 2's per-ask lines, each with id, response_type and the baseline arm's correct flag
 
     Ensures:
-        - returns one dict per record, in order: id, response_type, title, forecast, reason, correct, old_correct
+        - returns one dict per record, in order: id, response_type, title, forecast, reason, correct, old_correct, scorable, write_in
         - correct is replay_loop._score with per_field True, so an abstention or a missing row reads False
+        - scorable and write_in are replay_loop.answer_split's, on the same per-field basis, read from the answer alone
         - old_correct is run 2's own flag for the baseline arm, read from the record
     """
     rows = []
@@ -221,8 +223,9 @@ def score_rows( factory, records ):
             fore   = None if arm is None else arm.forecast
             reason = "no_row" if arm is None else arm.abstention_reason
             right  = _score( card.response_type, fore, card.response_value[ "value" ], card.response_options, per_field=True )
+            split  = answer_split( card.response_type, card.response_value[ "value" ], card.response_options, True )
             rows.append( { "id": record[ "id" ], "response_type": card.response_type, "title": card.title, "forecast": fore, "reason": reason,
-                           "correct": right, "old_correct": record[ "arms" ][ context_baseline.ARM ][ "correct" ] } )
+                           "correct": right, "old_correct": record[ "arms" ][ context_baseline.ARM ][ "correct" ], **split } )
     return rows
 
 
@@ -234,14 +237,17 @@ def line_of( label, rows ):
         - rows are score_rows' dicts
 
     Ensures:
-        - returns { label, asks, answered, correct, old_correct, abstained } where abstained maps a reason to its count
+        - returns { label, asks, answered, correct, correct_on_answered, old_correct, abstained, multiple_choice } where abstained maps
+          a reason to its count
         - correct and old_correct count over all asks, an abstention being a miss, as run 2 charged it
+        - multiple_choice is replay_loop.multiple_choice_split over the group's multiple-choice rows: right over scorable cards,
+          the unscored count and the write-in rate, beside the all-cards figure
     """
     answered = [ row for row in rows if row[ "forecast" ] is not None ]
     reasons  = collections.Counter( row[ "reason" ] for row in rows if row[ "forecast" ] is None )
     return { "label": label, "asks": len( rows ), "answered": len( answered ), "correct": sum( 1 for row in rows if row[ "correct" ] ),
              "correct_on_answered": sum( 1 for row in answered if row[ "correct" ] ), "old_correct": sum( 1 for row in rows if row[ "old_correct" ] ),
-             "abstained": dict( reasons ) }
+             "abstained": dict( reasons ), "multiple_choice": multiple_choice_split( [ row for row in rows if row[ "response_type" ] == RESPONSE_TYPE_MULTIPLE_CHOICE ] ) }
 
 
 def summarize( rows ):
@@ -270,9 +276,17 @@ def render( lines ):
 
     Ensures:
         - returns the text; every count is printed beside its denominator
+        - a group with multiple-choice cards also prints them as right of scorable, unscored and write-in cards, each of all its multiple-choice cards,
+          and the unscored cards a forecast still matched;
+          the correct column stays the all-cards figure, an unscored card read as a miss, so earlier numbers stay comparable
     """
     out = [ f"{'group':<18}{'asks':>6}{'answered':>10}{'correct':>9}{'old C0':>8}  abstained" ]
-    for line in lines: out.append( f"{line[ 'label' ]:<18}{line[ 'asks' ]:>6}{line[ 'answered' ]:>10}{line[ 'correct' ]:>9}{line[ 'old_correct' ]:>8}  {line[ 'abstained' ]}" )
+    for line in lines:
+        out.append( f"{line[ 'label' ]:<18}{line[ 'asks' ]:>6}{line[ 'answered' ]:>10}{line[ 'correct' ]:>9}{line[ 'old_correct' ]:>8}  {line[ 'abstained' ]}" )
+        split = line[ "multiple_choice" ]
+        if split[ "cards" ]:
+            out.append( f"{'':<18}multiple choice: right {split[ 'right' ]} of {split[ 'scorable' ]} scorable, unscored {split[ 'unscored' ]} of {split[ 'cards' ]}, "
+                        f"write-in cards {split[ 'write_in_cards' ]} of {split[ 'cards' ]}, unscored right {split[ 'unscored_right' ]}" )
     return "\n".join( out )
 
 

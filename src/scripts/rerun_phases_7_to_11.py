@@ -116,14 +116,17 @@ def window_counts( records ):
         - records are one arm's replay records in ask order, over every type
 
     Ensures:
-        - returns tune and final sizes, and for the final window the asks and correct counts of all, yes/no and multiple choice
+        - returns tune and final sizes, and for the final window the asks and correct counts of all, yes/no and multiple choice,
+          and the multiple-choice scorable count with the correct count among them, so its accuracy can be read over the cards that can be scored (None for records
+          replayed or cached before 27 Nov 2026, which carry no scorable flag)
     """
     tune, final = split_windows( len( records ) )
     tail        = records[ tune: ]
     scores      = _scores( tail )
     return { "tune": tune, "final": final, "final_all": sum( 1 for r in tail if r[ "meta" ][ "correct" ] ),
              "final_yes_no_asks": scores[ "yes_no" ][ "asks" ], "final_yes_no": scores[ "yes_no" ][ "correct" ],
-             "final_mc_asks": scores[ "multiple_choice" ][ "asks" ], "final_mc": scores[ "multiple_choice" ][ "correct" ] }
+             "final_mc_asks": scores[ "multiple_choice" ][ "asks" ], "final_mc": scores[ "multiple_choice" ][ "correct" ],
+             "final_mc_scorable": scores[ "multiple_choice" ][ "scorable" ], "final_mc_scorable_correct": scores[ "multiple_choice" ][ "correct_scorable" ] }
 
 
 def control_mismatches( counts ):

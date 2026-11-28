@@ -29,6 +29,7 @@ from unittest import mock
 from sqlalchemy.orm import Session
 
 from cosa.agents.prediction_engine import context_baseline, opus_twins, principle_retrieval, principles_forecast
+from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE
 from cosa.agents.prediction_engine.episode_view import fields_of
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner import extractor_job, opus_call, principles_call
@@ -40,7 +41,7 @@ from cosa.repo.doc_lint import model_transport
 from cosa.utils.atomic_json import write_json_atomic
 from cosa.research.preference_replay.checkpoint_report import FIRST_NAME, checkpoint_name
 from cosa.research.preference_replay.extractor_replay import ExtractorReplay, asks_from_session, check_no_leakage, make_recorder
-from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, always_yes_arm, replay, summarize
+from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, always_yes_arm, multiple_choice_split, replay, summarize
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session
 from cosa.research.preference_replay.service_embeddings import CachedServiceEmbedder
 from cosa.rest.repair_attempt_tracker import cosine_similarity
@@ -779,7 +780,8 @@ def _record_lines( run, models ):
         - models.rows holds the Haiku arms' rows for each ask of the chunk
 
     Ensures:
-        - returns one dict per ask, in ask order, with its id, type, family and, per arm, correct, forecast and the reason for an abstention
+        - returns one dict per ask, in ask order, with its id, type, family, scorable and write_in (replay_loop.answer_split's, facts of
+          the answer, so one per ask) and, per arm, correct, forecast and the reason for an abstention
     """
     lines = []
     for index, head in enumerate( run[ "records" ][ ENGINE_ARM ] ):
@@ -787,7 +789,8 @@ def _record_lines( run, models ):
         for name in RECORDED_ARMS:
             meta = run[ "records" ][ name ][ index ][ "meta" ]
             arms[ name ] = { "correct": meta[ "correct" ], "forecast": meta[ "forecast" ], "reason": models.rows.get( ( meta[ "notification_id" ], name ), ( None, None ) )[ 1 ] }
-        lines.append( { "id": head[ "meta" ][ "notification_id" ], "response_type": head[ "meta" ][ "response_type" ], "family": head[ "meta" ][ "family" ], "arms": arms } )
+        lines.append( { "id": head[ "meta" ][ "notification_id" ], "response_type": head[ "meta" ][ "response_type" ], "family": head[ "meta" ][ "family" ],
+                        "scorable": head[ "meta" ][ "scorable" ], "write_in": head[ "meta" ][ "write_in" ], "arms": arms } )
     return lines
 
 
@@ -873,6 +876,24 @@ def _coverage( records, arm ):
              "correct": correct, "accuracy_on_answered": correct / len( answered ) if answered else None }
 
 
+def _multiple_choice( rows, views, name ):
+    """
+    Split one arm's multiple-choice asks into scorable and unscored, with the write-in rate.
+
+    Requires:
+        - rows are first-stage lines; views[ name ] holds the arm's view of each, in the same order
+
+    Ensures:
+        - returns replay_loop.multiple_choice_split over the multiple-choice asks of rows, each with the arm's correct flag and the
+          line's own scorable and write_in
+        - returns None when a multiple-choice line has no scorable flag: lines recorded before 27 Nov 2026 never carried one,
+          and a split over only some of the lines would read as one over all of them
+    """
+    picked = [ ( line, views[ name ][ index ] ) for index, line in enumerate( rows ) if line[ "response_type" ] == RESPONSE_TYPE_MULTIPLE_CHOICE ]
+    if any( "scorable" not in line for line, _ in picked ): return None
+    return multiple_choice_split( [ { "correct": view[ "correct" ], "scorable": line[ "scorable" ], "write_in": line[ "write_in" ] } for line, view in picked ] )
+
+
 def _arm_view( line, twin_by_id, arm ):
     """
     Pick one arm's correct flag and forecast for one ask.
@@ -896,7 +917,8 @@ def build_report( records, twin_records, state, floor=OPERATIONAL_FLOOR ):
 
     Ensures:
         - returns { asks, floor, freeze, pairings, context_asks, not_replayable, unrebuildable_cases_chunk_sum, twin_stretch }, the freeze as the run stored it
-        - each pairing is replay_loop.summarize over the two arms on the same asks, with coverage and accuracy on the asks answered beside it
+        - each pairing is replay_loop.summarize over the two arms on the same asks, with coverage and accuracy on the asks answered beside it,
+          and each arm's multiple-choice split (_multiple_choice) as arm_multiple_choice and baseline_multiple_choice
         - an Opus pairing covers only the asks both twins have a line for, and its Haiku twin is cut to the same asks
         - a pairing whose arm has no line at all is reported as not run, with no verdict
     """
@@ -915,7 +937,8 @@ def build_report( records, twin_records, state, floor=OPERATIONAL_FLOOR ):
         shaped = [ { "arms": { name: views[ name ][ index ] for name in views } } for index in range( len( rows ) ) ]
         result = summarize( run, baseline, floor, arm=arm )
         pairings.append( { "arm": LABELS.get( arm, arm ), "baseline": LABELS.get( baseline, baseline ), "summary": result,
-                           "arm_coverage": _coverage( shaped, arm ), "baseline_coverage": _coverage( shaped, baseline ) } )
+                           "arm_coverage": _coverage( shaped, arm ), "baseline_coverage": _coverage( shaped, baseline ),
+                           "arm_multiple_choice": _multiple_choice( rows, views, arm ), "baseline_multiple_choice": _multiple_choice( rows, views, baseline ) } )
     return { "asks": len( records ), "floor": floor, "freeze": state.get( "freeze" ), "pairings": pairings, "context_asks": state[ "context_asks" ], "not_replayable": state[ "not_replayable" ],
              "unrebuildable_cases_chunk_sum": state[ "unrebuildable" ], "twin_stretch": len( stretch ) }
 
@@ -928,20 +951,43 @@ def render_report( report ):
         - report is build_report's result
 
     Ensures:
-        - returns markdown with one row per pairing: asks, discordant pairs both ways, floor met, the verdict word, and coverage and accuracy on answered per arm
+        - returns markdown with one row per pairing: asks, discordant pairs both ways, floor met, the verdict word, coverage and accuracy on answered per arm,
+          and each arm's multiple-choice right over scorable cards beside the unscored and write-in counts (_mc_cells)
     """
     lines = [ f"Evaluation asks: {report[ 'asks' ]}; discordant-pair floor {report[ 'floor' ]}; asks with an episode history {report[ 'context_asks' ]}; "
               f"twin stretch {report[ 'twin_stretch' ]} asks.", "",
-              "| arm | against | asks | arm only right | other only right | floor met | verdict | arm coverage | arm accuracy answered | other coverage | other accuracy answered |",
-              "|---|---|---|---|---|---|---|---|---|---|---|" ]
+              "| arm | against | asks | arm only right | other only right | floor met | verdict | arm coverage | arm accuracy answered | other coverage | other accuracy answered "
+              "| arm multiple choice right of scorable | other multiple choice right of scorable | multiple choice unscored · write-in · unscored right arm/other |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|" ]
     for item in report[ "pairings" ]:
         if "summary" not in item:
-            lines.append( f"| {item[ 'arm' ]} | {item[ 'baseline' ]} | {item[ 'status' ]} | | | | | | | | |" )
+            lines.append( f"| {item[ 'arm' ]} | {item[ 'baseline' ]} | {item[ 'status' ]} | | | | | | | | | | | |" )
             continue
         s, a, b = item[ "summary" ], item[ "arm_coverage" ], item[ "baseline_coverage" ]
         lines.append( f"| {item[ 'arm' ]} | {item[ 'baseline' ]} | {s[ 'asks_replayed' ]} | {s[ 'engine_only_right' ]} | {s[ 'baseline_only_right' ]} | {s[ 'floor_met' ]} | {_named_verdict( s[ 'verdict' ], item[ 'arm' ], item[ 'baseline' ] )} | "
-                      f"{_pct( a[ 'coverage' ] )} | {_pct( a[ 'accuracy_on_answered' ] )} | {_pct( b[ 'coverage' ] )} | {_pct( b[ 'accuracy_on_answered' ] )} |" )
+                      f"{_pct( a[ 'coverage' ] )} | {_pct( a[ 'accuracy_on_answered' ] )} | {_pct( b[ 'coverage' ] )} | {_pct( b[ 'accuracy_on_answered' ] )} | "
+                      f"{_mc_cells( item[ 'arm_multiple_choice' ], item[ 'baseline_multiple_choice' ] )} |" )
     return "\n".join( lines )
+
+
+def _mc_cells( arm_split, baseline_split ):
+    """
+    Write a pairing's three multiple-choice cells.
+
+    Requires:
+        - each split is _multiple_choice's result for one arm of the pairing, on the same asks
+
+    Ensures:
+        - returns the three cells joined by " | ": each arm's right over scorable with its percentage, then the unscored and
+          write-in counts, each of the multiple-choice asks, and each arm's unscored-right count; the unscored and write-in
+          counts are read from arm_split, since both arms share the asks
+        - a split that is None prints "not recorded" in all three cells, and a pairing with no multiple-choice asks prints "none"
+    """
+    if arm_split is None or baseline_split is None: return " | ".join( [ "not recorded" ] * 3 )
+    if not arm_split[ "cards" ]: return " | ".join( [ "none" ] * 3 )
+    right = [ f"{split[ 'right' ]}/{split[ 'scorable' ]} ({_pct( split[ 'accuracy_scorable' ] )})" for split in ( arm_split, baseline_split ) ]
+    return " | ".join( right + [ f"{arm_split[ 'unscored' ]} of {arm_split[ 'cards' ]} · {arm_split[ 'write_in_cards' ]} of {arm_split[ 'cards' ]}"
+                                 f" · unscored right {arm_split[ 'unscored_right' ]}/{baseline_split[ 'unscored_right' ]}" ] )
 
 
 def _named_verdict( verdict, arm, baseline ):

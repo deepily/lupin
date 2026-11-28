@@ -23,7 +23,7 @@ from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.preference_replay import archive_replay as ar
 from cosa.research.preference_replay import checkpoint_report as cr
 from cosa.research.preference_replay import extractor_replay as er
-from cosa.research.preference_replay.replay_loop import ENGINE_ARM
+from cosa.research.preference_replay.replay_loop import ENGINE_ARM, answer_split
 from cosa.research.preference_replay.scratch_db import scratch_session
 from cosa.research.preference_replay.service_embeddings import CachedServiceEmbedder
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PreferenceEvidence
@@ -1207,3 +1207,66 @@ def test_main_hands_the_engines_switch_to_the_twin_stage_scoring( tmp_path, arch
     seen = _spy_on_archive_score( monkeypatch )
     assert ar.main( [ "twins", "--poll-seconds", "1" ] + base, embed=embed, make_models=make, out=lambda line: None ) == 0
     assert seen and set( seen ) == { switch }, f"the twin arms must be scored on the engine's switch, which is {switch} here"
+
+
+def test_each_first_stage_line_carries_the_answer_split_of_its_ask_once_for_every_arm( loaded ):
+    session, asks, ids, embed, work, _ = loaded
+    _first_stage( loaded )
+    by_id   = { ask[ "id" ]: ask for ask in asks }
+    records = ar.read_jsonl( work.records )
+    per_field = PredictionEngine( debug=False ).per_field_mc_enabled
+    kinds   = { line[ "response_type" ] for line in records }
+    assert "multiple_choice" in kinds and "yes_no" in kinds, f"the loop must meet both kinds of ask, met {kinds}"
+    for line in records:
+        ask = by_id[ line[ "id" ] ]
+        assert { key: line[ key ] for key in ( "scorable", "write_in" ) } == answer_split( ask[ "response_type" ], ask[ "actual_value" ], ask[ "response_options" ], per_field )
+        assert not any( "scorable" in arm for arm in line[ "arms" ].values() ), "the split is a fact of the answer, written once per ask"
+
+
+def _mc_line( ask_id, principles, baseline, scorable=True, write_in=False ):
+    """Make one first-stage multiple-choice line with its answer split."""
+    return dict( _line( ask_id, principles=principles, baseline=baseline ), response_type="multiple_choice", scorable=scorable, write_in=write_in )
+
+
+def test_a_pairing_reports_each_arms_multiple_choice_right_over_scorable_beside_unscored_and_write_ins():
+    records = [ _mc_line( "a", True, True ), _mc_line( "b", True, False, write_in=True ), _mc_line( "c", False, True ),
+                _mc_line( "d", False, False, scorable=False, write_in=True ), _line( "y", principles=True, baseline=True ) ]
+    pairing = _pairing( ar.build_report( records, [], STATE ), ar.ARM_PRINCIPLES, ar.ARM_BASELINE )
+    assert pairing[ "arm_multiple_choice" ] == { "cards": 4, "scorable": 3, "unscored": 1, "right": 2, "unscored_right": 0, "correct_all_cards": 2, "accuracy_scorable": 2 / 3, "accuracy_all_cards": 0.5,
+                                                 "write_in_cards": 2, "write_in_rate": 0.5 }, "the yes/no ask stays out of the split"
+    assert pairing[ "baseline_multiple_choice" ][ "right" ] == 2 and pairing[ "baseline_multiple_choice" ][ "scorable" ] == 3
+    assert pairing[ "summary" ][ "engine_correct" ] == 3, "the verdict still counts every ask, as before"
+    row = next( line for line in ar.render_report( ar.build_report( records, [], STATE ) ).splitlines() if line.startswith( "| B1 | C0 | " ) )
+    assert row.endswith( "| 2/3 (66.7%) | 2/3 (66.7%) | 1 of 4 · 2 of 4 · unscored right 0/0 |" )
+    records[ 3 ][ "arms" ][ ar.ARM_PRINCIPLES ][ "correct" ] = True
+    split = _pairing( ar.build_report( records, [], STATE ), ar.ARM_PRINCIPLES, ar.ARM_BASELINE )[ "arm_multiple_choice" ]
+    assert ( split[ "right" ], split[ "unscored_right" ], split[ "correct_all_cards" ] ) == ( 2, 1, 3 ), "an unscored card a forecast matched is reported apart"
+    row   = next( line for line in ar.render_report( ar.build_report( records, [], STATE ) ).splitlines() if line.startswith( "| B1 | C0 | " ) )
+    assert row.endswith( "· unscored right 1/0 |" )
+
+
+def test_multiple_choice_lines_recorded_before_the_split_existed_say_not_recorded_rather_than_a_partial_figure():
+    old     = _mc_line( "a", True, True )
+    del old[ "scorable" ], old[ "write_in" ]
+    records = [ old, _mc_line( "b", True, True ) ]
+    pairing = _pairing( ar.build_report( records, [], STATE ), ar.ARM_PRINCIPLES, ar.ARM_BASELINE )
+    assert pairing[ "arm_multiple_choice" ] is None and pairing[ "baseline_multiple_choice" ] is None
+    assert ar._mc_cells( None, None ) == "not recorded | not recorded | not recorded"
+    assert ar.render_report( ar.build_report( records, [], STATE ) ).count( "not recorded | not recorded | not recorded" ) == len( ar.PAIRINGS ) - 2
+
+
+def test_a_pairing_with_no_multiple_choice_asks_says_none_in_its_multiple_choice_cells():
+    text = ar.render_report( ar.build_report( [ _line( "a", principles=True ) ], [], STATE ) )
+    row  = next( line for line in text.splitlines() if line.startswith( "| B1 | C0 | " ) )
+    assert row.endswith( "| none | none | none |" ) and text.splitlines()[ 3 ].count( "|" ) == 15
+
+
+def test_a_line_takes_scorable_and_write_in_from_the_ask_not_a_constant():
+    """The fixture has no all-typed card, so a hand-built run pins the copy."""
+    def record( name, scorable, write_in ):
+        return { "meta": { "notification_id": name, "response_type": "multiple_choice", "family": "f", "correct": False, "forecast": None,
+                           "scorable": scorable, "write_in": write_in } }
+    run    = { "records": { arm: [ record( "typed", False, True ), record( "picked", True, False ) ] for arm in ar.RECORDED_ARMS } }
+    models = mock.Mock( rows={} )
+    lines  = ar._record_lines( run, models )
+    assert [ ( line[ "scorable" ], line[ "write_in" ] ) for line in lines ] == [ ( False, True ), ( True, False ) ]

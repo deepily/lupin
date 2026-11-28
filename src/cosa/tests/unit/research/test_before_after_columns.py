@@ -41,8 +41,8 @@ def test_a_column_holds_every_key_and_cuts_the_run_into_windows_by_position( eng
 
 def test_the_windows_hold_seven_tune_asks_and_three_final_asks_with_their_own_scores_and_calibration( engine ):
     column = build_column( _run( engine ), HEADER )
-    assert column[ "coverage" ][ "scores" ][ "tune" ][ "yes_no" ] == { "asks": 7, "correct": 6 }
-    assert column[ "coverage" ][ "scores" ][ "final" ][ "yes_no" ] == { "asks": 3, "correct": 3 }
+    assert column[ "coverage" ][ "scores" ][ "tune" ][ "yes_no" ] == { "asks": 7, "scorable": 7, "correct": 6, "correct_scorable": 6 }
+    assert column[ "coverage" ][ "scores" ][ "final" ][ "yes_no" ] == { "asks": 3, "scorable": 3, "correct": 3, "correct_scorable": 3 }
     assert column[ "calibration" ][ "tune_size" ] == 7 and column[ "calibration" ][ "final_size" ] == 3
     assert column[ "yes_no_summary" ][ "asks_replayed" ] == 3
 
@@ -53,7 +53,7 @@ def test_rescoring_scores_the_named_asks_from_anywhere_in_the_run_and_fits_witho
     column  = build_column( run, HEADER, rescore_ids=[ "t0", "t4" ] )
     assert sorted( column[ "final_ids" ] ) == [ "t0", "t4" ] and column[ "ask_ids" ] == base[ "ask_ids" ]
     assert column[ "coverage" ][ "tune_mix" ] == {} and column[ "coverage" ][ "final_mix" ] == { "yes_no": 2 }
-    assert column[ "coverage" ][ "scores" ][ "final" ][ "yes_no" ] == { "asks": 2, "correct": 2 }
+    assert column[ "coverage" ][ "scores" ][ "final" ][ "yes_no" ] == { "asks": 2, "scorable": 2, "correct": 2, "correct_scorable": 2 }
     assert column[ "tune_note" ].startswith( "n/a" ) and column[ "yes_no_summary" ][ "asks_replayed" ] == 2
     assert column[ "calibration" ][ "final_size" ] == 2 and column[ "calibration" ][ "tune_size" ] == 6
 
@@ -121,7 +121,9 @@ def test_the_three_rescore_options_go_together( tmp_path, given, capsys ):
 
 def test_the_scores_and_mix_count_every_eligible_type_even_when_a_type_has_no_records():
     records = [ { "meta": { "response_type": "yes_no", "correct": True } }, { "meta": { "response_type": "yes_no", "correct": False } } ]
-    assert columns._scores( records ) == { "yes_no": { "asks": 2, "correct": 1 }, "multiple_choice": { "asks": 0, "correct": 0 } }
+    assert columns._scores( records ) == { "yes_no": { "asks": 2, "scorable": None, "correct": 1, "correct_scorable": None },
+                                           "multiple_choice": { "asks": 0, "scorable": 0, "correct": 0, "correct_scorable": 0 } }, \
+        "records with no scorable flag give no scorable count rather than a partial one"
     assert columns._mix( records ) == { "yes_no": 2 }
     assert columns._rows( [ { "meta": { "response_type": "yes_no", "strategy": "s", "confidence": None, "correct": True } } ] ) == []
 
@@ -147,3 +149,11 @@ def test_the_column_file_holds_one_space_indented_sorted_json_with_a_closing_new
     text = out.read_text( encoding="utf-8" )
     assert text == json.dumps( column, indent=1, sort_keys=True ) + "\n" and text.startswith( '{\n "ask_count": ' )
     assert [ p.name for p in tmp_path.iterdir() ] == [ "col.json" ]
+
+
+def test_the_scores_count_the_scorable_asks_of_each_type_from_the_records_flags():
+    meta    = lambda kind, correct, scorable: { "meta": { "response_type": kind, "correct": correct, "scorable": scorable } }
+    records = [ meta( "multiple_choice", True, True ), meta( "multiple_choice", False, True ), meta( "multiple_choice", True, False ), meta( "yes_no", True, True ) ]
+    assert columns._scores( records ) == { "yes_no": { "asks": 1, "scorable": 1, "correct": 1, "correct_scorable": 1 },
+                                           "multiple_choice": { "asks": 3, "scorable": 2, "correct": 2, "correct_scorable": 1 } }, \
+        "a correct unscorable ask stays in correct and out of correct_scorable"

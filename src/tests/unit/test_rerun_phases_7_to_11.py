@@ -164,7 +164,7 @@ def test_window_counts_counts_the_final_window_after_the_seventy_percent_cut_by_
     records = [ rec( f"t{i}", correct=False ) for i in range( 7 ) ]                       # tune: 7 of 10
     records += [ rec( "y1", "yes_no", True ), rec( "y2", "yes_no", False ), rec( "m1", "multiple_choice", True ) ]
     counts = rrm.window_counts( records )
-    assert counts == { "tune": 7, "final": 3, "final_all": 2, "final_yes_no_asks": 2, "final_yes_no": 1, "final_mc_asks": 1, "final_mc": 1 }
+    assert counts == { "tune": 7, "final": 3, "final_all": 2, "final_yes_no_asks": 2, "final_yes_no": 1, "final_mc_asks": 1, "final_mc": 1, "final_mc_scorable": None, "final_mc_scorable_correct": None }
 
 
 def test_control_mismatches_names_each_figure_that_differs_and_is_empty_for_a_match():
@@ -445,3 +445,11 @@ def test_run_as_a_script_exits_with_the_argument_parsers_code_when_required_argu
     monkeypatch.setattr( sys, "argv", [ "rerun_phases_7_to_11.py" ] )
     with pytest.raises( SystemExit ) as raised: runpy.run_path( rrm.__file__, run_name="__main__" )
     assert raised.value.code == 2
+
+
+def test_window_counts_gives_the_multiple_choice_scorable_count_of_the_final_window():
+    records = [ rec( f"t{i}", correct=False ) for i in range( 7 ) ]
+    records += [ rec( "m1", "multiple_choice", True ), rec( "m2", "multiple_choice", False ), rec( "m3", "multiple_choice", False ) ]
+    for record, scorable in zip( records, [ True ] * 7 + [ True, True, False ] ): record[ "meta" ][ "scorable" ] = scorable
+    counts = rrm.window_counts( records )
+    assert ( counts[ "final_mc_scorable" ], counts[ "final_mc_scorable_correct" ], counts[ "final_mc" ] ) == ( 2, 1, 1 )

@@ -465,3 +465,127 @@ def test_summarize_pairs_an_arm_against_a_comparator_through_the_same_run( engin
     assert ( report[ "engine_correct" ], report[ "baseline_correct" ], report[ "engine_only_right" ] ) == ( 12, 0, 12 )
     assert report[ "verdict" ] == "engine better"
     assert summarize( run, "c0", 10 )[ "arm" ] == ENGINE_ARM
+
+
+# Three real multiple-choice cards from run 2's archive (full-answer arm, haiku-rerun-fixed-parser), schema and answer as stored.
+# d0de8570: the one field is a typed write-in, so nothing is scorable. 447420e6: one field typed, one picked, so it is scorable
+# and holds a write-in. 1a591f86: the recommended option picked, scorable with no write-in.
+ALL_TYPED = {
+    "response_options" : { "questions": [ { "header": "Promote", "question": "Our consensus doc is ready. Will you click Approve on the four promotes and answer_by now?", "multi_select": False,
+                                            "options": [ { "label": "Approving now (Recommended)", "description": "Pro: four workers start tonight." }, { "label": "Not tonight", "description": "Pro: nothing new starts." } ] } ] },
+    "actual_value"     : "{\"answers\":{\"Promote\":\"I'm literally in the middle of doing this Wait 5 minutes until I'm done and re-ask this question okay?\"}}",
+    "forecast"         : { "answers": { "Promote": "Approving now (Recommended)" } },
+}
+ONE_TYPED = {
+    "response_options" : { "questions": [
+        { "header": "Drive sign-in", "question": "Where are you with the Google Drive sign-in?", "multi_select": False,
+          "options": [ { "label": "Done, test it (Recommended)" }, { "label": "Still working on it" }, { "label": "Stuck" } ] },
+        { "header": "Approvals", "question": "Approve the scroll-pin bug and the wiki lint fix?", "multi_select": True,
+          "options": [ { "label": "Scroll-pin bug 2958799a" }, { "label": "Wiki lint fix e6ae2505" } ] } ] },
+    "actual_value"     : "{\"answers\":{\"Drive sign-in\":\"Check back in on me in 10 minutes\",\"Approvals\":[\"Scroll-pin bug 2958799a\",\"Wiki lint fix e6ae2505\"]}}",
+    "forecast"         : { "answers": { "Drive sign-in": "Still working on it", "Approvals": [ "Scroll-pin bug 2958799a", "Wiki lint fix e6ae2505" ] } },
+}
+NONE_TYPED = {
+    "response_options" : { "questions": [ { "header": "P0 petition", "question": "Third ask, Rick: start, hold, or drop the P0 petition end-to-end row?", "multi_select": False,
+                                            "options": [ { "label": "Start it now (Recommended)" }, { "label": "Hold until tomorrow" }, { "label": "Drop it" } ] } ] },
+    "actual_value"     : "{\"answers\":{\"P0 petition\":\"Start it now (Recommended)\"}}",
+    "forecast"         : { "answers": { "P0 petition": "Start it now (Recommended)" } },
+}
+
+
+@pytest.mark.parametrize( "card, per_field, expected", [
+    ( ALL_TYPED, True, { "scorable": False, "write_in": True } ),
+    ( ONE_TYPED, True, { "scorable": True, "write_in": True } ),
+    ( NONE_TYPED, True, { "scorable": True, "write_in": False } ),
+    ( ALL_TYPED, False, { "scorable": True, "write_in": True } ),
+] )
+def test_the_answer_split_reads_scorability_from_the_answer_and_the_write_in_whatever_the_switch( card, per_field, expected ):
+    """With the switch off a typed field is a miss, so the card is scorable and still a write-in."""
+    assert replay_loop.answer_split( "multiple_choice", card[ "actual_value" ], card[ "response_options" ], per_field ) == expected
+
+
+def test_an_unscorable_card_reads_false_for_a_right_forecast_and_a_scorable_one_reads_true():
+    """The split agrees with _score: no forecast is right on a card with nothing to score."""
+    perfect = { "answers": json.loads( ALL_TYPED[ "actual_value" ] )[ "answers" ] }
+    assert replay_loop._score( "multiple_choice", perfect, ALL_TYPED[ "actual_value" ], ALL_TYPED[ "response_options" ], True ) is False
+    assert replay_loop._score( "multiple_choice", NONE_TYPED[ "forecast" ], NONE_TYPED[ "actual_value" ], NONE_TYPED[ "response_options" ], True ) is True
+    assert replay_loop._score( "multiple_choice", ONE_TYPED[ "forecast" ], ONE_TYPED[ "actual_value" ], ONE_TYPED[ "response_options" ], True ) is True, \
+        "the typed field is left out, and the picked field matches"
+
+
+@pytest.mark.parametrize( "value", [ "", "not json", "{\"answers\":{}}" ] )
+def test_a_multiple_choice_answer_with_nothing_in_it_is_neither_scorable_nor_a_write_in( value ):
+    assert replay_loop.answer_split( "multiple_choice", value, NONE_TYPED[ "response_options" ], True ) == { "scorable": False, "write_in": False }
+
+
+def test_any_other_answer_type_is_scorable_with_no_write_in():
+    assert replay_loop.answer_split( "yes_no", "no", None, True ) == { "scorable": True, "write_in": False }
+
+
+def test_the_split_reports_right_over_scorable_beside_the_all_cards_figure_and_the_write_in_rate():
+    rows = [ { "correct": True, "scorable": True, "write_in": False }, { "correct": True, "scorable": True, "write_in": True },
+             { "correct": False, "scorable": True, "write_in": False }, { "correct": False, "scorable": False, "write_in": True } ]
+    assert replay_loop.multiple_choice_split( rows ) == { "cards": 4, "scorable": 3, "unscored": 1, "right": 2, "unscored_right": 0, "correct_all_cards": 2,
+                                                          "accuracy_scorable": 2 / 3, "accuracy_all_cards": 0.5, "write_in_cards": 2, "write_in_rate": 0.5 }
+
+
+def test_a_correct_unscored_card_is_counted_apart_and_stays_in_the_all_cards_figure():
+    """A forecast that matches an unscorable card is reported apart, never dropped."""
+    split = replay_loop.multiple_choice_split( [ { "correct": True, "scorable": False, "write_in": True }, { "correct": False, "scorable": True, "write_in": False } ] )
+    assert ( split[ "right" ], split[ "unscored_right" ], split[ "correct_all_cards" ] ) == ( 0, 1, 1 )
+    assert split[ "accuracy_scorable" ] == 0.0 and split[ "accuracy_all_cards" ] == 0.5
+
+
+def test_a_forecast_that_answers_a_free_text_field_matches_an_unscorable_card_which_the_split_then_counts_apart():
+    """The reviewer's case: the cut does not stop a forecast matching through a free-text field."""
+    value  = json.dumps( { "answers": { "Plan": "neither, ask me tomorrow", "Note": "ship it soon" } } )
+    split  = replay_loop.answer_split( "multiple_choice", value, WITH_NOTE, True )
+    right  = replay_loop._score( "multiple_choice", { "answers": { "Note": "ship it soon" } }, value, WITH_NOTE, True )
+    assert split[ "scorable" ] is False and right is True
+    counts = replay_loop.multiple_choice_split( [ dict( split, correct=right ) ] )
+    assert ( counts[ "unscored_right" ], counts[ "accuracy_all_cards" ], counts[ "accuracy_scorable" ] ) == ( 1, 1.0, None )
+
+
+def test_an_empty_split_has_no_ratios_rather_than_zeros():
+    assert replay_loop.multiple_choice_split( [] ) == { "cards": 0, "scorable": 0, "unscored": 0, "right": 0, "unscored_right": 0, "correct_all_cards": 0,
+                                                        "accuracy_scorable": None, "accuracy_all_cards": None, "write_in_cards": 0, "write_in_rate": None }
+
+
+@pytest.mark.parametrize( "per_field, typed_split", [ ( True, { "scorable": False, "write_in": True } ), ( False, { "scorable": True, "write_in": True } ) ] )
+def test_every_record_carries_the_answer_split_of_its_ask_on_the_engines_switch( engine, per_field, typed_split ):
+    """Every arm's record carries the ask's split, read on the engine's per-field switch."""
+    engine.per_field_mc_enabled = per_field
+    asks = [ _ask( engine, name, 9, minutes, card[ "actual_value" ], response_type="multiple_choice", response_options=card[ "response_options" ] )
+             for name, minutes, card in ( ( "typed", 0, ALL_TYPED ), ( "half", 10, ONE_TYPED ), ( "picked", 20, NONE_TYPED ) ) ]
+    asks.append( _ask( engine, "plain", 10, 30, "yes" ) )
+    run  = replay( asks, engine, SHA )
+    for records in run[ "records" ].values():
+        got = [ { key: r[ "meta" ][ key ] for key in ( "scorable", "write_in" ) } for r in records ]
+        assert got == [ replay_loop.answer_split( a[ "response_type" ], a[ "actual_value" ], a[ "response_options" ], engine.per_field_mc_enabled ) for a in asks ]
+        assert got[ 0 ] == typed_split and got[ 1: ] == [ { "scorable": True, "write_in": True }, { "scorable": True, "write_in": False }, { "scorable": True, "write_in": False } ]
+
+
+WITH_NOTE = { "questions": [ { "header": "Plan", "question": "Which plan?", "options": [ { "label": "Plan A" }, { "label": "Plan B" } ] },
+                             { "header": "Note", "question": "Anything else?", "input_type": "text" } ] }
+
+
+@pytest.mark.parametrize( "per_field, expected", [ ( True, { "scorable": False, "write_in": True } ), ( False, { "scorable": True, "write_in": True } ) ] )
+def test_a_free_text_field_does_not_make_a_card_scorable_because_no_forecaster_answers_one( per_field, expected ):
+    """Plan is typed and Note is free text: with the switch on, no field is left to match."""
+    value = json.dumps( { "answers": { "Plan": "neither, ask me tomorrow", "Note": "busy" } } )
+    assert replay_loop.answer_split( "multiple_choice", value, WITH_NOTE, per_field ) == expected
+    best = { "answers": { "Plan": "neither, ask me tomorrow" } }
+    assert replay_loop._score( "multiple_choice", best, value, WITH_NOTE, per_field ) is False, "the best a forecaster can give is still not right"
+
+
+def test_a_card_whose_only_answered_field_is_free_text_is_not_scorable_even_with_the_switch_off():
+    value = json.dumps( { "answers": { "Note": "busy" } } )
+    assert replay_loop.answer_split( "multiple_choice", value, WITH_NOTE, False ) == { "scorable": False, "write_in": False }
+
+
+def test_a_malformed_schema_leaves_the_answer_uncut_and_scores_every_field_as_a_single_select():
+    value = json.dumps( { "answers": { "Plan": "Plan A" } } )
+    assert replay_loop.answer_split( "multiple_choice", value, None, True ) == { "scorable": True, "write_in": False }
+    assert replay_loop._option_fields_only( { "value": "x" }, WITH_NOTE ) == { "value": "x" }, "no answers map, nothing to cut"
+    assert replay_loop._option_fields_only( { "answers": { "Note": "n" } }, {} ) == { "answers": { "Note": "n" } }, "a schema listing no fields cuts nothing"
+    assert replay_loop._option_fields_only( { "answers": { "Plan": "Plan A", "Note": "n" } }, WITH_NOTE ) == { "answers": { "Plan": "Plan A" } }

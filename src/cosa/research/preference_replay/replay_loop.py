@@ -14,7 +14,7 @@ Two rules keep the answer out of its own forecast:
 
 import copy
 
-from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
+from cosa.agents.prediction_engine.accuracy_comparators import get_comparator, offered_labels, schema_questions
 from cosa.agents.prediction_engine.ask_family import classify_asks
 from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE, RESPONSE_TYPE_OPEN_ENDED_BATCH
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
@@ -132,6 +132,92 @@ def _score( response_type, predicted, actual_value, response_options, per_field,
     return match is True
 
 
+def answer_split( response_type, actual_value, response_options, per_field ):
+    """
+    Say, from the answer alone, whether a card can be scored and whether it holds a write-in.
+
+    Requires:
+        - response_type, actual_value, response_options and per_field are what _score takes for the same card
+
+    Ensures:
+        - returns { "scorable": bool, "write_in": bool }; no forecast is read
+        - a multiple-choice card is scorable when the best forecast a forecaster can give gets a verdict from the comparator
+          _score calls, on the same per_field basis. That forecast is the answer itself, cut to the fields whose schema lists
+          options, because no forecaster answers a free-text field. So with the switch on, a card is not scorable when every
+          answered option field is a typed write-in; with it off, a card is scorable when it has an answered option field
+        - a schema the comparator calls malformed, or one that lists no fields, leaves the answer uncut, since no field can
+          then be told to list options
+        - a forecast that answers a free-text field can still be scored right on an unscorable card; this is not
+          ruled out here, so multiple_choice_split counts such cards apart as unscored_right
+        - write_in is True when at least one field is a typed write-in, asked of the per-field comparator whatever the
+          switch, because whether Rick typed his own answer is a fact of the answer, not of the scoring basis
+        - any other response type is scorable and has no write-in
+    """
+    if response_type != RESPONSE_TYPE_MULTIPLE_CHOICE: return { "scorable": True, "write_in": False }
+    actual     = _actual_dict( actual_value, response_type )
+    best       = _option_fields_only( actual, response_options )
+    verdict, _ = get_comparator( response_type, response_options=response_options, per_field=per_field )( best, actual )
+    _, detail  = get_comparator( response_type, response_options=response_options, per_field=True )( actual, actual )
+    return { "scorable": verdict is not None, "write_in": detail.get( "other_write_in", 0 ) > 0 }   # an empty answer's detail names only its reason
+
+
+def _option_fields_only( actual, response_options ):
+    """
+    Cut a multiple-choice answer to the fields whose schema lists options.
+
+    Requires:
+        - actual is _actual_dict's result for a multiple-choice card; response_options is its stored schema or anything else
+
+    Ensures:
+        - returns a new dict whose "answers" keeps only the headers the schema gives offered labels
+        - returns actual unchanged when accuracy_comparators.schema_questions finds the schema malformed or listing no
+          fields, or actual holds no answers map; the comparator then reports the card as it would any forecast
+    """
+    questions = schema_questions( response_options )
+    answers   = actual.get( "answers" )
+    if not isinstance( answers, dict ) or not questions: return actual
+    listed = { q[ "header" ] for q in questions if offered_labels( q ) }
+    return { "answers": { header: value for header, value in answers.items() if header in listed } }
+
+
+def multiple_choice_split( rows ):
+    """
+    Report multiple-choice accuracy over scorable cards, the all-cards figure and write-ins.
+
+    Requires:
+        - rows is a list of dicts, one per multiple-choice card of one arm, each holding the bools "correct", "scorable"
+          and "write_in" (a replay record's meta, a per-ask line, or a driver's scored row)
+
+    Ensures:
+        - returns { cards, scorable, unscored, right, unscored_right, correct_all_cards, accuracy_scorable, accuracy_all_cards,
+          write_in_cards, write_in_rate }
+        - right counts the correct cards among the scorable ones; accuracy_scorable is right over scorable
+        - correct_all_cards counts every correct card and accuracy_all_cards is it over every card: the figure published
+          before 27 Nov 2026, kept so earlier numbers stay comparable, whatever the scorable flags say
+        - unscored_right counts the correct cards among the unscored ones, so a card answer_split calls unscorable that a
+          forecast still matched is reported, never hidden; right plus unscored_right is correct_all_cards
+        - write_in_rate is write_in_cards over cards
+        - each ratio is None when its denominator is 0
+    """
+    cards    = len( rows )
+    scorable = [ row for row in rows if row[ "scorable" ] ]
+    right    = sum( 1 for row in scorable if row[ "correct" ] )
+    correct  = sum( 1 for row in rows if row[ "correct" ] )
+    write_in = sum( 1 for row in rows if row[ "write_in" ] )
+    return {
+        "cards"              : cards,
+        "scorable"           : len( scorable ),
+        "unscored"           : cards - len( scorable ),
+        "right"              : right,
+        "unscored_right"     : correct - right,
+        "correct_all_cards"  : correct,
+        "accuracy_scorable"  : right / len( scorable ) if scorable else None,
+        "accuracy_all_cards" : correct / cards if cards else None,
+        "write_in_cards"     : write_in,
+        "write_in_rate"      : write_in / cards if cards else None,
+    }
+
+
 def complete_action_summary( run, arm=ENGINE_ARM ):
     """
     Publish an arm's complete-action accuracy, with its coverage and pass rate.
@@ -219,7 +305,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
           without its own retry group; the lookup vote reads those same cases
         - returns { records, not_replayable, unrebuildable_cases, families } where records maps each arm to
           one record per replayable ask, in the same order, with arm, row_index, frozen_index, body,
-          snapshot_sha256 and meta; meta["correct"] is a bool
+          snapshot_sha256 and meta; meta["correct"] is a bool, and meta["scorable"] and meta["write_in"] are answer_split's
         - with engine.timeout_defaults_excluded_enabled, a flagged ask is neither predicted nor scored but counted in
           timeout_defaults, and a baseline sees no flagged case; with it off timeout_defaults is 0 and nothing changes
         - not_replayable counts the asks with no vector and not_replayable_ids names them, in ask order;
@@ -275,6 +361,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             result = engine.predict( _notification_dict( ask ), query_vector=ask[ "question_embedding" ] )
             families.add( classes[ index ][ "family" ] )
             forecasts = { ENGINE_ARM: _forecast_of( result ) }
+            split     = answer_split( ask[ "response_type" ], ask[ "actual_value" ], ask[ "response_options" ], engine.per_field_mc_enabled )
             if context_arms:
                 view       = None if episode_view_provider is None else episode_view_provider( _ask_at_ask( ask ), copy.deepcopy( visible ) )
                 principles = None if principles_provider is None else principles_provider( _ask_at_ask( ask ), asked_at )
@@ -291,6 +378,8 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
                     "meta"            : {
                         "notification_id" : ask[ "id" ],
                         "correct"       : _score( ask[ "response_type" ], predicted, ask[ "actual_value" ], ask[ "response_options" ], per_field=engine.per_field_mc_enabled ),
+                        "scorable"      : split[ "scorable" ],
+                        "write_in"      : split[ "write_in" ],
                         "response_type" : ask[ "response_type" ],
                         "family"        : classes[ index ][ "family" ],
                         "forecast"      : predicted,

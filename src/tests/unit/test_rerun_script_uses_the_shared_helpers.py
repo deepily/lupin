@@ -59,7 +59,7 @@ def test_window_counts_reads_each_types_own_asks_and_correct_counts_from_the_fin
                   [ record( "multiple_choice", n == 0 ) for n in range( final - 3 ) ]
     assert rrm.window_counts( head + tail ) == {
         "tune": tune, "final": final, "final_all": 2 + 1,
-        "final_yes_no_asks": 3, "final_yes_no": 2, "final_mc_asks": final - 3, "final_mc": 1 }
+        "final_yes_no_asks": 3, "final_yes_no": 2, "final_mc_asks": final - 3, "final_mc": 1, "final_mc_scorable": None, "final_mc_scorable_correct": None }
 
 
 def test_split_by_time_uses_the_fraction_it_is_given():

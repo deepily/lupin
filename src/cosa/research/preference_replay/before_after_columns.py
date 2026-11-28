@@ -33,16 +33,29 @@ FLOOR = 10
 
 def _scores( records: Sequence[Dict[str, Any]] ) -> Dict[str, Dict[str, int]]:
     """
-    Count asks and correct forecasts by answer type.
+    Count asks, scorable asks and correct forecasts by answer type.
 
     Requires:
-        - records are engine records whose meta holds response_type and correct
+        - records are engine records whose meta holds response_type and correct, and scorable (replay_loop.answer_split's)
+          on a record replayed since 27 Nov 2026
 
     Ensures:
-        - returns type to asks and correct, with every eligible type present, zero when it has no records
+        - returns type to asks, scorable, correct and correct_scorable, with every eligible type present, zero when it has no records
+        - correct counts every correct ask, as before 27 Nov 2026; scorable counts the asks whose answer can be scored at all
+          (only a multiple-choice ask can fall short), and correct_scorable the correct asks among them, so correct_scorable
+          over scorable is the accuracy over scorable cards
+        - scorable and correct_scorable are None for a type when any of its records has no scorable flag (a record replayed
+          or cached before 27 Nov 2026), because a count over only some of them would read as one over all
     """
-    return { kind: { "asks"    : sum( 1 for r in records if r[ "meta" ][ "response_type" ] == kind ),
-                     "correct" : sum( 1 for r in records if r[ "meta" ][ "response_type" ] == kind and r[ "meta" ][ "correct" ] ) } for kind in ELIGIBLE_TYPES }
+    scores = {}
+    for kind in ELIGIBLE_TYPES:
+        metas          = [ r[ "meta" ] for r in records if r[ "meta" ][ "response_type" ] == kind ]
+        recorded       = all( "scorable" in meta for meta in metas )
+        scores[ kind ] = { "asks"             : len( metas ),
+                           "scorable"         : sum( 1 for meta in metas if meta[ "scorable" ] ) if recorded else None,
+                           "correct"          : sum( 1 for meta in metas if meta[ "correct" ] ),
+                           "correct_scorable" : sum( 1 for meta in metas if meta[ "scorable" ] and meta[ "correct" ] ) if recorded else None }
+    return scores
 
 
 def _mix( records: Sequence[Dict[str, Any]] ) -> Dict[str, int]:

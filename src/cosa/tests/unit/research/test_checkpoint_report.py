@@ -394,3 +394,15 @@ def test_the_command_reads_the_current_values_from_a_file( tmp_path ):
     current.write_text( json.dumps( { **BOUND, "judge_version": "x" } ) )
     assert cr.main( base + [ "--current", str( current ) ], lambda line: None ) == 3
     assert cr.main( base, lambda line: None ) == 3
+
+
+def test_the_score_table_gives_the_scorable_count_and_rate_beside_the_all_asks_rate_and_says_when_it_was_not_recorded():
+    scores = { "tune": { "yes_no": { "asks": 364, "scorable": 364, "correct": 100, "correct_scorable": 100 },
+                         "multiple_choice": { "asks": 547, "scorable": 374, "correct": 190, "correct_scorable": 187 } },
+               "final": { "yes_no": { "asks": 215, "scorable": None, "correct": 163, "correct_scorable": None },
+                          "multiple_choice": { "asks": 176, "scorable": 0, "correct": 0, "correct_scorable": 0 } } }
+    text   = _report( coverage=dict( COVERAGE, scores=scores ) )
+    assert "| tune | multiple_choice | 547 | 190 | 34.7 | 374 | 50.0 |" in text, "the all-asks rate counts every correct ask; the scorable rate only the scorable ones"
+    assert "| final | yes_no | 215 | 163 | 75.8 | not recorded | not recorded |" in text
+    assert "| final | multiple_choice | 176 | 0 | 0.0 | 0 | n/a |" in text
+    assert "| tune | yes_no | 364 | 100 | 27.5 | not recorded | not recorded |" in _report( coverage=dict( COVERAGE, scores=SCORES ) ), "a column saved before the count existed"

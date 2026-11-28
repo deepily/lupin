@@ -292,7 +292,7 @@ def test_the_yes_no_comparison_against_always_yes_is_read_from_each_columns_summ
 def test_a_column_with_a_tune_note_reports_final_window_figures_only( columns ):
     rows = bar.column_rows( columns[ 3 ] )
     tune = [ name for name in rows if name.startswith( "tune " ) ]
-    assert len( tune ) == 6 and all( rows[ name ] == NOTE for name in tune )
+    assert len( tune ) == 10 and all( rows[ name ] == NOTE for name in tune )
     assert rows[ "final correct: yes_no" ] == 172
     assert rows[ "threshold" ] == 0.6
     plain = bar.column_rows( columns[ 2 ] )
@@ -370,3 +370,17 @@ def test_a_pipe_in_a_figure_name_is_escaped_so_every_table_row_keeps_eight_cells
     row = next( line for line in text.splitlines() if line.startswith( "| calibration yes_no" ) and "|cbr" in line )
     assert row.startswith( "| calibration yes_no\\|cbr |" )
     assert len( row.replace( "\\|", "" ).split( "|" ) ) - 2 == 8
+
+
+def test_a_column_with_scorable_counts_reports_them_and_the_rate_over_scorable_asks_beside_the_old_rate():
+    column = _column( "L", "abc", "stored", 391, 160, 30, [ "a" ] )
+    scores = column[ "coverage" ][ "scores" ]
+    scores[ "tune" ][ "multiple_choice" ].update( scorable=60, correct_scorable=27 )
+    scores[ "final" ][ "multiple_choice" ].update( scorable=0, correct_scorable=0 )
+    scores[ "final" ][ "yes_no" ].update( scorable=None, correct_scorable=None )
+    rows   = bar.column_rows( column )
+    assert rows[ "tune correct per 100: multiple_choice" ] == 30.0 and rows[ "tune scorable: multiple_choice" ] == 60
+    assert rows[ "tune correct per 100 scorable: multiple_choice" ] == 45.0, "correct_scorable over scorable, not every correct ask over scorable"
+    assert ( rows[ "final scorable: multiple_choice" ], rows[ "final correct per 100 scorable: multiple_choice" ] ) == ( 0, "n/a" )
+    assert ( rows[ "final scorable: yes_no" ], rows[ "final correct per 100 scorable: yes_no" ] ) == ( "not recorded", "not recorded" )
+    assert rows[ "tune scorable: yes_no" ] == "not recorded", "a score with no scorable key is not recorded"

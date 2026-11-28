@@ -108,7 +108,8 @@ def column_rows( column: Dict[str, Any] ) -> Dict[str, Any]:
     Ensures:
         - returns label to figure, a number or a string, never recomputed from another figure here
         - holds the ask count, the frozen threshold and top k, each window's mix, each window's correct count
-          and correct per 100 by answer type (n/a for a type with no asks), the yes/no comparison against always-yes
+          and correct per 100 by answer type (n/a for a type with no asks), and beside it the scorable count and correct per 100
+          over scorable asks (correct_scorable over scorable) ("not recorded" when the column has no scorable count, n/a for none scorable), the yes/no comparison against always-yes
           (counts, discordant pairs, McNemar p and verdict), and each calibration cell
         - with a tune_note, every figure whose label starts with "tune " reads that note
         - a calibration cell that was not fitted shows its status in place of Brier scores
@@ -123,6 +124,12 @@ def column_rows( column: Dict[str, Any] ) -> Dict[str, Any]:
             score = coverage[ "scores" ][ window ][ kind ]
             rows[ f"{window} correct: {kind}" ]         = score[ "correct" ]
             rows[ f"{window} correct per 100: {kind}" ] = 100.0 * score[ "correct" ] / score[ "asks" ] if score[ "asks" ] > 0 else "n/a"
+            if "scorable" not in score or score[ "scorable" ] is None:
+                rows[ f"{window} scorable: {kind}" ]                 = "not recorded"
+                rows[ f"{window} correct per 100 scorable: {kind}" ] = "not recorded"
+                continue
+            rows[ f"{window} scorable: {kind}" ]                 = score[ "scorable" ]
+            rows[ f"{window} correct per 100 scorable: {kind}" ] = 100.0 * score[ "correct_scorable" ] / score[ "scorable" ] if score[ "scorable" ] > 0 else "n/a"
     summary = column[ "yes_no_summary" ]
     rows[ "yes_no vs always-yes: predictor correct" ]      = summary[ "engine_correct" ]
     rows[ "yes_no vs always-yes: baseline correct" ]       = summary[ "baseline_correct" ]
