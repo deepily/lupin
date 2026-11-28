@@ -19,8 +19,9 @@ EXPORT = [ line( "blind", "A", "no" ), line( "settled", "A", "yes" ), line( "set
            line( "settled", "B", "no", "2026-11-27T11:00:00Z" ), line( "unsure", "A", "cant_tell" ) ]
 
 
-def write( tmp_path, export=EXPORT, readers=READERS, ids=IDS ):
+def write( tmp_path, export=None, readers=None ):
     """Lay out a sample, two readers and an export, and return the command's arguments."""
+    export, readers, ids = export or EXPORT, readers or READERS, IDS
     ( tmp_path / "sample.jsonl" ).write_text( "".join( json.dumps( { "pair_id": i } ) + "\n" for i in ids ) )
     args = [ "--sample", str( tmp_path / "sample.jsonl" ), "--rick", str( tmp_path / "rick.json" ), "--out", str( tmp_path / "labels.jsonl" ) ]
     for name, held in readers.items():
