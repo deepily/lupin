@@ -300,11 +300,14 @@ def test_main_refuses_three_readers_or_an_unreadable_file_and_writes_nothing( tm
     assert not out.exists() and "cannot build the page" in capsys.readouterr().err
 
 
-def test_run_as_a_module_exits_with_mains_code( monkeypatch ):
-    monkeypatch.setattr( sys, "argv", [ "pair_page", "--help" ] )
+def test_run_as_a_module_exits_with_mains_code( tmp_path, monkeypatch ):
+    """An output that exists makes main return 2, so the exit code is main's and not argparse's."""
+    out = tmp_path / "page.html"
+    out.write_text( "mine", encoding="utf-8" )
+    monkeypatch.setattr( sys, "argv", [ "pair_page", *argv_for( inputs( tmp_path ), out ) ] )
     monkeypatch.delitem( sys.modules, "cosa.research.judge_validation.pair_page" )
 
     with pytest.raises( SystemExit ) as stopped:
         runpy.run_module( "cosa.research.judge_validation.pair_page", run_name="__main__" )
 
-    assert stopped.value.code == 0
+    assert stopped.value.code == 2
