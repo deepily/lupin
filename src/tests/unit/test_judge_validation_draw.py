@@ -11,7 +11,7 @@ from cosa.utils.file_hash import file_sha256
 def pair( n, predicted="a", actual="b", kind="yes_no", **extra ):
     """One pair; its texts decide the mismatch flag."""
     row = { "pair_id": f"p{n:03d}", "notification_id": f"c-{n}", "response_type": kind, "field_key": "", "predicted_text": predicted,
-            "actual_text": actual, "arm": "secret-arm", "literal_mismatch": ( predicted or "" ).strip().lower() != ( actual or "" ).strip().lower() }
+            "actual_text": actual, "refers_to_earlier": False, "stance": "yes", "arm": "secret-arm", "literal_mismatch": ( predicted or "" ).strip().lower() != ( actual or "" ).strip().lower() }
     row.update( extra )
     return row
 
@@ -79,7 +79,8 @@ def test_the_sample_is_uniform_per_type_blind_and_repeatable():
     sample, receipt = draw.draw_sample( pairs, seed=7 )
     assert draw.draw_sample( list( reversed( pairs ) ), seed=7 )[ 0 ] == sample
     assert draw.draw_sample( pairs, seed=8 )[ 0 ] != sample
-    assert all( set( row ) == set( draw.BLIND_FIELDS ) | { "stratum", "pattern", "inclusion" } for row in sample )
+    common = set( draw.BLIND_FIELDS ) | { "stratum", "pattern", "inclusion" }
+    assert all( set( row ) == common | ( { "stance" } if row[ "stratum" ] == "yes_no" else set() ) for row in sample )
     assert "secret-arm" not in json.dumps( sample )
     assert receipt[ "strata" ] == { "multiple_choice": { "population": 5, "drawn": 5, "inclusion": 1.0 },
                                     "yes_no": { "population": 100, "drawn": 80, "inclusion": 0.8 } }
@@ -115,7 +116,8 @@ def test_the_files_are_written_once_with_their_hashes_and_readers_see_no_arm( tm
     forecasts = [ json.loads( l ) for l in ( out / draw.FORECASTS_FILE ).read_text().splitlines() ]
     assert len( answers ) == 85 and len( forecasts ) == 85
     assert { r[ "pair_id" ] for r in answers } == { r[ "pair_id" ] for r in forecasts } and "predicted_text" not in json.dumps( answers )
-    assert set( answers[ 0 ] ) == { "pair_id", "notification_id", "field_key", "actual_text", "response_type", "message", "abstract", "options", "answer" }
+    common    = { "pair_id", "notification_id", "field_key", "actual_text", "response_type", "message", "abstract", "options", "answer" }
+    assert all( set( row ) == common | ( { "stance" } if row[ "response_type" ] == "yes_no" else set() ) for row in answers )
     assert set( forecasts[ 0 ] ) == { "pair_id", "notification_id", "field_key", "predicted_text" }
     assert answers[ 0 ][ "answer" ] == "yes" and "private@example.com" not in json.dumps( answers )
     assert "answer_history" not in json.dumps( answers + forecasts ) + ( out / draw.SAMPLE_FILE ).read_text()
@@ -128,3 +130,25 @@ def test_a_card_missing_from_the_cards_file_writes_nothing( tmp_path, capsys ):
     _, args = written( tmp_path, [ pair( 999 ) ], cards=[] )
     assert draw.main( args ) == draw.EXIT_REFUSED
     assert "not in the cards file" in capsys.readouterr().err and not ( tmp_path / "out" ).exists()
+
+
+@pytest.mark.parametrize( "kind, actual, shown", [
+    ( "yes_no", None, "no condition added" ), ( "yes_no", "  ", "no condition added" ), ( "yes_no", "only today", "only today" ),
+    ( "multiple_choice", "  ", "  " ) ] )
+def test_the_answers_file_gives_the_stance_and_names_an_empty_yes_no_condition( kind, actual, shown ):
+    row   = pair( 1, "forecast", actual, kind, stance="neither" )
+    cards = { "c-1": { "response_type": kind, "message": "Go?", "abstract": "", "options": None, "answer": "no" } }
+    sample, _          = draw.draw_sample( [ row ], seed=1 )
+    answers, forecasts = draw.reader_files( sample, cards, seed=1 )
+    assert answers[ 0 ][ "actual_text" ] == shown
+    assert answers[ 0 ].get( "stance" ) == ( "neither" if kind == "yes_no" else None )
+    assert "stance" not in forecasts[ 0 ] and "refers_to_earlier" not in answers[ 0 ] | forecasts[ 0 ]
+    assert sample[ 0 ][ "actual_text" ] == actual
+
+
+@pytest.mark.parametrize( "field", [ "stance", "refers_to_earlier" ] )
+def test_a_pair_missing_a_new_field_is_refused( field ):
+    row = pair( 1 )
+    del row[ field ]
+    with pytest.raises( ValueError, match=field ):
+        draw.draw_sample( [ row ], seed=1 )

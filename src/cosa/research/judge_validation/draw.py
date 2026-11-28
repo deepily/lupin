@@ -33,7 +33,8 @@ DRAW_FILE       = "draw.json"
 ANSWERS_FILE    = "reader-answers.jsonl"
 FORECASTS_FILE  = "reader-forecasts.jsonl"
 CARD_FIELDS     = ( "response_type", "message", "abstract", "options", "answer" )
-BLIND_FIELDS    = ( "pair_id", "notification_id", "response_type", "field_key", "predicted_text", "actual_text" )
+BLIND_FIELDS    = ( "pair_id", "notification_id", "response_type", "field_key", "predicted_text", "actual_text", "refers_to_earlier" )
+NO_CONDITION    = "no condition added"
 EXIT_REFUSED    = 1
 
 
@@ -115,18 +116,20 @@ def draw_sample( pairs, seed, per_type=PER_TYPE ):
 
     Requires:
         - pairs is a list of dicts holding BLIND_FIELDS, with pair_id unique; seed is an integer
+        - a yes/no pair also holds stance, the stance the answer took
         - per_type is a positive integer
 
     Ensures:
         - returns ( sample, receipt )
-        - sample rows hold BLIND_FIELDS, stratum, pattern and inclusion, and nothing else, in a seeded order
+        - sample rows hold BLIND_FIELDS, stratum, pattern and inclusion, plus stance for yes/no, and nothing else,
+          in a seeded order
         - stratum is the card type; min( per_type, its pairs ) are drawn without replacement, so every pair of
           a type has the same chance, which is inclusion
         - receipt holds seed, per_type, drawn and, per stratum, population, drawn and inclusion
         - the same pairs, in any order, with the same arguments give the same sample
 
     Raises:
-        - ValueError when pairs is empty or a pair_id repeats
+        - ValueError when pairs is empty or a pair_id repeats, or a drawn pair lacks a field
     """
     if not pairs: raise ValueError( "there are no pairs to draw from" )
     by_id = { pair[ "pair_id" ]: pair for pair in pairs }
@@ -139,7 +142,11 @@ def draw_sample( pairs, seed, per_type=PER_TYPE ):
         inclusion = len( chosen ) / len( members[ name ] )
         strata[ name ] = { "population": len( members[ name ] ), "drawn": len( chosen ), "inclusion": inclusion }
         for pair_id in chosen:
-            row = { field: by_id[ pair_id ][ field ] for field in BLIND_FIELDS }
+            wanted = BLIND_FIELDS + ( ( "stance", ) if name == "yes_no" else () )
+            try:
+                row = { field: by_id[ pair_id ][ field ] for field in wanted }
+            except KeyError as error:
+                raise ValueError( f"pair {pair_id} lacks the field {error}" ) from error
             row.update( stratum=name, pattern=pattern_of( by_id[ pair_id ] ), inclusion=inclusion )
             sample.append( row )
     random.Random( seed ).shuffle( sample )
@@ -177,12 +184,17 @@ def reader_files( sample, cards, seed ):
         - returns ( answers, forecasts ), each shuffled by seed
         - answers holds one row per pair: pair_id, notification_id, field_key, actual_text, the card and
           the answer, and no forecast
+        - a yes/no answers row also holds stance, and its blank actual_text reads NO_CONDITION
         - forecasts holds one row per pair: pair_id, notification_id, field_key and predicted_text
-        - neither holds a stratum, an inclusion figure, an arm or a model
+        - neither holds a stratum, an inclusion figure, an arm, a model or refers_to_earlier
     """
     ordered   = sorted( sample, key=lambda row: row[ "pair_id" ] )
     keys      = ( "pair_id", "notification_id", "field_key" )
     answers   = [ dict( cards[ row[ "notification_id" ] ], **{ field: row[ field ] for field in keys + ( "actual_text", ) } ) for row in ordered ]
+    for row, shown in zip( ordered, answers ):
+        if row[ "response_type" ] != "yes_no": continue
+        shown[ "stance" ] = row[ "stance" ]
+        if not ( row[ "actual_text" ] or "" ).strip(): shown[ "actual_text" ] = NO_CONDITION
     forecasts = [ { field: row[ field ] for field in keys + ( "predicted_text", ) } for row in ordered ]
     random.Random( f"{seed}:answers" ).shuffle( answers )
     random.Random( f"{seed}:forecasts" ).shuffle( forecasts )

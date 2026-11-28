@@ -180,6 +180,50 @@ def agreement( first, second ):
     return result
 
 
+def arm_name( entry ):
+    """
+    Name one arm with its model.
+
+    Requires:
+        - entry has arm and model
+    """
+    return f"{entry[ 'arm' ]} ({entry[ 'model' ]})"
+
+
+def self_reference( sample, rows, key ):
+    """
+    Split the judge's agreement by whether a forecast refers to an earlier answer.
+
+    Requires:
+        - sample rows hold pair_id, response_type and refers_to_earlier (bool)
+        - rows are the sample rows that have a label, each also holding human (bool) and judge (bool or None)
+        - key is { pair_id: { arm, model } }
+
+    Ensures:
+        - returns one { arm, response_type, pairs, share_flagged, flagged, unflagged } per arm and card type sampled
+        - pairs and share_flagged count every sampled pair, unresolved ones included
+        - flagged and unflagged give the judge's agreement with the label over the labelled pairs, with its
+          interval; an unreadable reply counts as disagreement
+
+    Raises:
+        - ValueError when a sampled pair has no key
+    """
+    cells = {}
+    for pair in sample:
+        if pair[ "pair_id" ] not in key: raise ValueError( f"pair {pair[ 'pair_id' ]} has no key" )
+        cells.setdefault( ( arm_name( key[ pair[ "pair_id" ] ] ), pair[ "response_type" ] ), [] ).append( pair )
+    out = []
+    for ( arm, kind ), held in sorted( cells.items() ):
+        ids  = { pair[ "pair_id" ] for pair in held }
+        line = { "arm": arm, "response_type": kind, "pairs": len( held ),
+                 "share_flagged": sum( 1 for pair in held if pair[ "refers_to_earlier" ] ) / len( held ) }
+        for name, flag in ( ( "flagged", True ), ( "unflagged", False ) ):
+            side         = [ row for row in rows if row[ "pair_id" ] in ids and row[ "refers_to_earlier" ] is flag ]
+            line[ name ] = proportion( sum( 1 for row in side if row[ "judge" ] is row[ "human" ] ), len( side ) )
+        out.append( line )
+    return out
+
+
 def arm_bias( rows, key ):
     """
     Split the judge's misses and false alarms by the arm that made each forecast.
@@ -193,15 +237,11 @@ def arm_bias( rows, key ):
     Raises:
         - ValueError when a pair has no key
     """
-    def label( entry ):
-        """Name one arm with its model."""
-        return f"{entry[ 'arm' ]} ({entry[ 'model' ]})"
-
     results, keys = [], {}
     for row in rows:
         pair_id = row[ "pair_id" ]
         if pair_id not in key: raise ValueError( f"pair {pair_id} has no key" )
-        keys[ pair_id ] = f"{label( key[ pair_id ] )} · {'material' if row[ 'human' ] else 'not material'}"
+        keys[ pair_id ] = f"{arm_name( key[ pair_id ] )} · {'material' if row[ 'human' ] else 'not material'}"
         results.append( { "id": pair_id, "seed_span": ( 0, 0 ) if row[ "human" ] else None, "lists": [ row[ "judge" ] != row[ "human" ] ] } )
     return judge_comparison.group_rows( results, keys, 1, names=sorted( set( keys.values() ) ), names_of=lambda name: [ name ],
                                         wrong_of=lambda result, slot: result[ "lists" ][ slot ] )
@@ -301,6 +341,7 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
         - passes is True only when both classes have a scored stratum and both rates are at least PASS_FLOOR
         - judge_against_human covers the scored pairs; human_against_human covers each pair of readers on every
           sampled pair both labelled
+        - self_reference is self_reference's rows over the sample and every resolved pair
 
     Raises:
         - answer_judge.JudgeHashMismatch when the current judge or any verdict row differs from the recorded one
@@ -358,6 +399,7 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
         "judge_against_human" : agreement( [ row[ "judge" ] for row in answered ], [ row[ "human" ] for row in answered ] ),
         "human_against_human" : reader_agreement( [ pair[ "pair_id" ] for pair in sample ], labelled ),
         "arm_bias"            : arm_bias( scored, key ),
+        "self_reference"      : self_reference( sample, rows, key ),
         "passes"              : passes,
     }
 
