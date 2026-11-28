@@ -62,6 +62,10 @@ from cosa.agents.prediction_engine.config import (
     PREDICTOR_VERSION,
     DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED,
     DEFAULT_COMPLETE_ACTION_SCORING_ENABLED,
+    DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED,
+    DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED,
+    DEFAULT_CANDIDATE_TEMPLATE_CAP,
+    CANDIDATE_OVERFETCH_FACTOR,
     RESPONSE_TYPE_YES_NO,
     RESPONSE_TYPE_MULTIPLE_CHOICE,
     RESPONSE_TYPE_OPEN_ENDED,
@@ -71,6 +75,7 @@ from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine import evidence_recorder
 from cosa.agents.prediction_engine import failure_visibility
+from cosa.agents.prediction_engine.candidate_filter import thin_candidates
 from cosa.rest.code_identity import get_code_identity
 from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
@@ -145,6 +150,9 @@ class PredictionEngine:
             self.timeout_defaults_excluded_enabled = config_mgr.get( "prediction engine timeout defaults excluded enabled", default=str( DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED ), return_type="boolean" )
             self.lookup_neither_forecast_enabled = config_mgr.get( "prediction engine lookup neither forecast enabled", default=str( DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED ), return_type="boolean" )
             self.complete_action_scoring_enabled = config_mgr.get( "prediction engine complete action scoring enabled", default=str( DEFAULT_COMPLETE_ACTION_SCORING_ENABLED ), return_type="boolean" )
+            self.candidate_retry_dedupe_enabled = config_mgr.get( "prediction engine candidate retry dedupe enabled", default=str( DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED ), return_type="boolean" )
+            self.candidate_template_cap_enabled = config_mgr.get( "prediction engine candidate template cap enabled", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED ), return_type="boolean" )
+            self.candidate_template_cap         = config_mgr.get( "prediction engine candidate template cap", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP ), return_type="int" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -174,6 +182,9 @@ class PredictionEngine:
             self.timeout_defaults_excluded_enabled = DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED
             self.lookup_neither_forecast_enabled = DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED
             self.complete_action_scoring_enabled = DEFAULT_COMPLETE_ACTION_SCORING_ENABLED
+            self.candidate_retry_dedupe_enabled = DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED
+            self.candidate_template_cap_enabled = DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED
+            self.candidate_template_cap         = DEFAULT_CANDIDATE_TEMPLATE_CAP
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -356,6 +367,28 @@ class PredictionEngine:
         """
         return { "answer_source": "human", "owner_user_id": "" if owner_user_id is None else str( owner_user_id ) }
 
+    def _find_candidates( self, store, limit: int, **query ) -> list:
+        """
+        Fetch the neighbours that may vote, thinned when a candidate switch is on.
+
+        Requires:
+            - store has find_similar; limit is a positive int; query holds its other arguments
+
+        Ensures:
+            - with both candidate switches off, returns store.find_similar( limit=limit, **query ) untouched
+            - with either on, fetches CANDIDATE_OVERFETCH_FACTOR times the limit and returns at most limit pairs after
+              thin_candidates, so a place a thinned copy held goes to the next nearest case
+
+        Raises:
+            - whatever find_similar raises
+        """
+        if not ( self.candidate_retry_dedupe_enabled or self.candidate_template_cap_enabled ):
+            return store.find_similar( limit=limit, **query )
+        return thin_candidates(
+            store.find_similar( limit=limit * CANDIDATE_OVERFETCH_FACTOR, **query ), limit,
+            dedupe       = self.candidate_retry_dedupe_enabled,
+            template_cap = self.candidate_template_cap if self.candidate_template_cap_enabled else None )
+
     def _ratified_weight( self, record ) -> float:
         """
         Vote weight a retrieved CBR case adds to its decision_value, by thumbs up/down state.
@@ -520,7 +553,8 @@ class PredictionEngine:
         # Find similar past notifications (filtered by response_type)
         store_error = None
         try:
-            similar_cases = store.find_similar(
+            similar_cases = self._find_candidates(
+                store,
                 query_embedding = embedding,
                 category        = category,
                 limit           = self.cbr_top_k,
@@ -1006,7 +1040,8 @@ class PredictionEngine:
         # Find similar past notifications (filtered by response_type)
         store_error = None
         try:
-            similar_cases = store.find_similar(
+            similar_cases = self._find_candidates(
+                store,
                 query_embedding = embedding,
                 category        = category,
                 limit           = self.cbr_top_k,
@@ -1328,7 +1363,8 @@ class PredictionEngine:
         # Retrieve top K similar cases using open-ended-specific thresholds (filtered by response_type)
         store_error = None
         try:
-            similar_cases = store.find_similar(
+            similar_cases = self._find_candidates(
+                store,
                 query_embedding = embedding,
                 category        = category,
                 limit           = self.open_ended_cbr_top_k,
@@ -1706,7 +1742,8 @@ class PredictionEngine:
 
         Ensures:
             - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings,
-              and over the per-field multiple-choice, lookup-neither and complete-action switches, each only when it is on
+              and over the per-field multiple-choice, lookup-neither, complete-action and two candidate switches, each only
+              when it is on; the template cap's number counts only with its switch on
             - the same settings give the same string, and a changed setting gives a different one
         """
         settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
@@ -1717,6 +1754,8 @@ class PredictionEngine:
         if self.per_field_mc_enabled: settings[ "per_field_mc_enabled" ] = True   # absent when off, so every earlier version string is unchanged
         if self.lookup_neither_forecast_enabled: settings[ "lookup_neither_forecast_enabled" ] = True
         if self.complete_action_scoring_enabled: settings[ "complete_action_scoring_enabled" ] = True
+        if self.candidate_retry_dedupe_enabled: settings[ "candidate_retry_dedupe_enabled" ] = True
+        if self.candidate_template_cap_enabled: settings[ "candidate_template_cap" ] = self.candidate_template_cap
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
     def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:
