@@ -4,8 +4,9 @@ Fetch the principles that apply to one ask, and shape them as a prompt block.
 Retrieval is cosine over each principle's statement and rationale.
 Owner, scope and ``encoder_version`` are columns, so they go in the SQL filter.
 Status depends on the ask's moment, so it cannot be a SQL filter and is applied after the search.
-Every principle that passes the SQL filter is fetched, and its status is derived as of the ask
-(``principle_status.derive_statuses``). Contested, retracted and evidence-less ones are dropped, and the first ``k`` are kept.
+Every principle that passes the SQL filter is fetched, and a status is derived as of the ask
+(``principle_status.status_deriver``). Contested, retracted and evidence-less ones are dropped, and the first ``k`` are kept.
+Status is derived walking down the cosine order, and only until ``k`` are kept.
 Contested principles therefore never use up a slot.
 
 The limit and the fetch multiplier are read from the INI file (``retrieval_limits``), shipped at 5,000 and 0 by Rick's ruling of 20 Nov 2026.
@@ -20,7 +21,7 @@ import secrets
 from sqlalchemy import and_
 
 from cosa.agents.prediction_engine.principle_features import feature_lookup, notification_lookup
-from cosa.agents.prediction_engine.principle_status import CONTESTED, RETRACTED, SOURCE_EXTRACT, SUPPORTING, derive_statuses, usable_at
+from cosa.agents.prediction_engine.principle_status import CONTESTED, RETRACTED, SOURCE_EXTRACT, SUPPORTING, StatusesOnRead, rows_by_principle, status_deriver, usable_at
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.db.repositories.vector_search import dot_topk
 from cosa.utils.iso_timestamp import aware_moment
@@ -191,10 +192,12 @@ def applicability_rules( principles, evidence, asked_at, extractor_version, card
         - RULE_STAGE: card_stage is given, some supporting row names a stage and none names the card's
         - a principle whose rows quote no antecedent, or name no stage, passes that rule; the antecedent rule is tried first
     """
-    rules = {}
+    rules   = {}
+    grouped = rows_by_principle( evidence )
     for principle in principles:
-        rows   = supporting_rows( principle.id, evidence, asked_at, extractor_version )
-        quotes = [ e.antecedent for e in supporting_rows( principle.id, evidence, asked_at, extractor_version, relations=None ) if e.antecedent ]
+        own    = grouped.get( principle.id, [] )
+        rows   = supporting_rows( principle.id, own, asked_at, extractor_version )
+        quotes = [ e.antecedent for e in supporting_rows( principle.id, own, asked_at, extractor_version, relations=None ) if e.antecedent ]
         stages = { e.decision_stage for e in rows if e.decision_stage }
         if quotes and not any( q.casefold() in card.casefold() for q in quotes ): rules[ principle.id ] = RULE_ANTECEDENT
         elif card_stage is not None and stages and card_stage not in stages: rules[ principle.id ] = RULE_STAGE
@@ -222,7 +225,7 @@ def select_principles( scored, statuses, k=DEFAULT_K, rules=None, dropped=None )
 
     Requires:
         - scored is [ ( similarity_pct, principle ) ] best first
-        - statuses is derive_statuses' result
+        - statuses is derive_statuses' result, or a StatusesOnRead; only get( principle.id ) is called, in cosine order, until k are kept
         - k is a positive int
         - rules is None or applicability_rules' result; dropped is None or a list to append to
 
@@ -267,6 +270,7 @@ def retrieve_principles( session, owner_id, project, query_embedding, asked_at, 
           passed the SQL filter, short True when fewer than k were kept (the count is the caller's to record)
         - with a check, the result also has applicability, { principle_id, rule } for each principle applicability_rules dropped, in cosine order; with no check the result has no such key, so it is what it was before the switch
         - with caveats, each returned entry also has caveat, latest_caveat's pick for its principle; without, entries are what they were
+        - a status is derived only for the candidates walked before k were kept; the principles chosen are those a status for every principle would choose
         - nothing is written
 
     Raises:
@@ -284,8 +288,9 @@ def retrieve_principles( session, owner_id, project, query_embedding, asked_at, 
     # despite its name, dot_topk's exclude_filter is a filter() that keeps the matching rows, before the limit
     scored = dot_topk( session, PreferencePrinciple, PreferencePrinciple.embedding, query_embedding, limit=limit, exclude_filter=allowed, metric="cosine" )
     principles, evidence = load_owner_ledger( session, owner_id )
-    statuses = derive_statuses( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence if e.session_key is None ] ),
-                               feature_lookup( session, [ e.notification_id for e in evidence ] ) )
+    status_of = status_deriver( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence if e.session_key is None ] ),
+                                feature_lookup( session, [ e.notification_id for e in evidence ] ) )
+    statuses  = StatusesOnRead( principles, status_of )
     rules    = None if applicability is None else applicability_rules( principles, evidence, asked_at, extractor_version, applicability[ "card" ], applicability[ "card_stage" ] )
     dropped  = []
     kept     = select_principles( scored, statuses, k, rules, dropped )

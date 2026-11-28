@@ -9,7 +9,7 @@ pins:
   - cosa.agents.prediction_engine.principle_retrieval.principle_block@5cd1a15483
   - cosa.agents.prediction_engine.principle_retrieval.retrieval_limits@5fc23ecaa0
   - cosa.agents.prediction_engine.principle_retrieval.reembed_principles@efb771ad50
-  - cosa.agents.prediction_engine.principle_retrieval.retrieve_principles@c0fac40c6e
+  - cosa.agents.prediction_engine.principle_retrieval.retrieve_principles@5035db41c9
   - cosa.agents.prediction_engine.principle_retrieval.select_principles@162439d3a1
   - cosa.agents.prediction_engine.principle_retrieval.session_lookup@1cd4e9b9ac
   - cosa.agents.prediction_engine.principle_features.card_features@db9c0264e8
@@ -21,7 +21,7 @@ pins:
 Fetches the principles that apply to one ask and shapes them as a prompt block. Tables are in [[rest-preference-principle-tables]]. The forecast that uses the block is in [[principles-forecast-arm]].
 
 ## What it does
-- `retrieve_principles` filters in SQL by owner, an embedding, the same `encoder_version` and scope global or `project:<name>`. At or below the limit it fetches every match in cosine order. Above it, a positive multiplier M fetches only the `k` x M nearest. Each status is derived as of the ask.
+- `retrieve_principles` filters in SQL by owner, an embedding, the same `encoder_version` and scope global or `project:<name>`. At or below the limit it fetches every match in cosine order. Above it, a positive multiplier M fetches only the `k` x M nearest. Statuses are derived as of the ask, down the cosine order until `k` are kept. `src/scripts/check_principle_store_speed.py` compares retrieval and every status with an earlier commit's code.
 - It returns `principles`, `available` and `short`. Nothing is written. More than `bound` matches raise `PrincipleBoundExceeded` when the multiplier is 0.
 - `retrieval_limits()` reads the limit and multiplier from the INI file, shipped at 5000 and 0. A missing key raises, a limit under 1 raises, and a negative multiplier raises.
 - `select_principles( scored, statuses, k )` drops principles with no usable evidence, contested ones and retracted ones. Then it keeps the first `k`, so a dropped principle never takes a slot.

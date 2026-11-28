@@ -300,6 +300,104 @@ def _ruled( principle, rulings, principles_by_id, asked_at ):
     return max( found, key=lambda r: ( aware_moment( r.answered_at ), aware_moment( r.extracted_at ) ), default=None )
 
 
+def rows_by_principle( rows ):
+    """
+    Sort evidence rows into one list per principle, reading the rows once.
+
+    Requires:
+        - rows have principle_id
+
+    Ensures:
+        - returns { principle_id: [ rows ] }, each list in the order the rows were given
+        - a principle with no row has no key; nothing is changed
+    """
+    grouped = {}
+    for row in rows: grouped.setdefault( row.principle_id, [] ).append( row )
+    return grouped
+
+
+def status_deriver( principles, evidence, asked_at, current_version, session_of, features_of=None, condition_keys=None, source_dedup=None ):
+    """
+    Prepare one ask's evidence once, and give a function that derives one principle's status.
+
+    Requires:
+        - the arguments of derive_statuses; principles is the owner's whole list, so a ruling on an earlier principle is found
+
+    Ensures:
+        - returns status_of( principle ), which gives what derive_statuses gives for that principle
+        - the two switches are read, and the evidence is filtered and grouped, once, here and not per principle
+        - status_of reads only that principle's own rows and the rulings, so deriving a few principles costs only those few
+        - no row is read or written outside the arguments, and none is changed
+    """
+    by_key   = switch_on( CONDITION_KEYS_SWITCH ) if condition_keys is None else condition_keys
+    dedup    = switch_on( SOURCE_DEDUP_SWITCH ) if source_dedup is None else source_dedup
+    by_id    = { p.id: p for p in principles }
+    rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
+    own      = rows_by_principle( e for e in evidence
+                                  if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and e.relation != UNINFORMATIVE and usable_at( e, asked_at ) )
+
+    def status_of( principle ):
+        """
+        Derive one principle's status as of the ask this function was prepared for.
+
+        Ensures:
+            - returns None when no evidence of the principle was usable at the ask, else { status, conditions, episodes, sessions, ruled }
+        """
+        rows        = own.get( principle.id, [] )
+        supporting  = [ e for e in rows if e.relation in SUPPORTING ]
+        if dedup: supporting = _once_per_source( supporting )
+        contra      = [ e for e in rows if e.relation == CONTRADICTING ]
+        if not rows: return None
+        ruling      = _ruled( principle, rulings, by_id, asked_at )
+        sessions    = _sessions( supporting, session_of )
+        conditions  = _conditions( supporting, by_key )
+        if ruling is not None and ruling.relation == CONTRADICTING: status = RETRACTED
+        elif ruling is not None:
+            later = [ e for e in contra if aware_moment( e.answered_at ) > aware_moment( ruling.answered_at ) ]
+            if ruling.source == SOURCE_SPLIT and features_of is not None:
+                other = _other_side_values( ruling, rulings )
+                later = [ e for e in later if str( ( features_of( e.notification_id ) or {} ).get( ruling.field_key ) ) not in other ]
+            if _contested( supporting, later, by_key ): status = CONTESTED
+            else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
+        elif not supporting: status = RETRACTED
+        elif _contested( supporting, contra, by_key ): status = CONTESTED
+        else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
+        if ruling is not None and ruling.condition and ruling.condition not in conditions: conditions.append( ruling.condition )
+        result = { "status": status, "conditions": conditions, "episodes": len( { e.notification_id for e in supporting } ),
+                   "sessions": len( sessions ), "ruled": ruling is not None }
+        if dedup: result.update( _tallies( supporting ) )
+        return result
+
+    return status_of
+
+
+class StatusesOnRead:
+    """
+    The statuses of one ask, each derived when it is asked for and not before.
+
+    Requires:
+        - principles are the owner's whole list; status_of is status_deriver's result over that list
+
+    Ensures:
+        - get( principle_id ) gives what derive_statuses' result gives for that id, None for an id not in the list
+        - a principle nobody asks for is never derived
+    """
+
+    def __init__( self, principles, status_of ):
+        self._by_id     = { p.id: p for p in principles }
+        self._status_of = status_of
+
+    def get( self, principle_id ):
+        """
+        Derive one principle's status.
+
+        Ensures:
+            - returns status_of's result for the principle with this id, or None when there is no such principle
+        """
+        principle = self._by_id.get( principle_id )
+        return None if principle is None else self._status_of( principle )
+
+
 def derive_statuses( principles, evidence, asked_at, current_version, session_of, features_of=None, condition_keys=None, source_dedup=None ):
     """
     Derive the status of every principle as of one ask.
@@ -328,37 +426,7 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         - with condition_keys on, conditions group by stored condition_key and no model is called; with source_dedup on,
           supporting rows with one source_key count once and the result adds standing and inferred; with both off, nothing changes
         - no row is read or written outside the arguments, and none is changed
+        - the work grows with principles plus rows: status_deriver groups the rows by principle once
     """
-    by_key   = switch_on( CONDITION_KEYS_SWITCH ) if condition_keys is None else condition_keys
-    dedup    = switch_on( SOURCE_DEDUP_SWITCH ) if source_dedup is None else source_dedup
-    by_id    = { p.id: p for p in principles }
-    rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
-    own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and e.relation != UNINFORMATIVE and usable_at( e, asked_at ) ]
-    statuses = {}
-    for principle in principles:
-        rows        = [ e for e in own if e.principle_id == principle.id ]
-        supporting  = [ e for e in rows if e.relation in SUPPORTING ]
-        if dedup: supporting = _once_per_source( supporting )
-        contra      = [ e for e in rows if e.relation == CONTRADICTING ]
-        if not rows:
-            statuses[ principle.id ] = None
-            continue
-        ruling      = _ruled( principle, rulings, by_id, asked_at )
-        sessions    = _sessions( supporting, session_of )
-        conditions  = _conditions( supporting, by_key )
-        if ruling is not None and ruling.relation == CONTRADICTING: status = RETRACTED
-        elif ruling is not None:
-            later = [ e for e in contra if aware_moment( e.answered_at ) > aware_moment( ruling.answered_at ) ]
-            if ruling.source == SOURCE_SPLIT and features_of is not None:
-                other = _other_side_values( ruling, rulings )
-                later = [ e for e in later if str( ( features_of( e.notification_id ) or {} ).get( ruling.field_key ) ) not in other ]
-            if _contested( supporting, later, by_key ): status = CONTESTED
-            else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
-        elif not supporting: status = RETRACTED
-        elif _contested( supporting, contra, by_key ): status = CONTESTED
-        else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
-        if ruling is not None and ruling.condition and ruling.condition not in conditions: conditions.append( ruling.condition )
-        statuses[ principle.id ] = { "status": status, "conditions": conditions, "episodes": len( { e.notification_id for e in supporting } ),
-                                     "sessions": len( sessions ), "ruled": ruling is not None }
-        if dedup: statuses[ principle.id ].update( _tallies( supporting ) )
-    return statuses
+    status_of = status_deriver( principles, evidence, asked_at, current_version, session_of, features_of, condition_keys, source_dedup )
+    return { principle.id: status_of( principle ) for principle in principles }

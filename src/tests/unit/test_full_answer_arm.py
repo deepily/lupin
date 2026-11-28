@@ -390,3 +390,14 @@ def test_the_pair_with_flag_prints_the_comparison_after_the_table( world, tmp_pa
 
 def test_the_ratio_shows_a_dash_for_none():
     assert arm._ratio( None ) == "-" and arm._ratio( 0.5 ) == "0.500"
+
+
+def test_the_tables_checked_for_missing_columns_can_be_named( world ):
+    older = sqlite3.connect( world[ "archive" ] )
+    older.execute( "ALTER TABLE prediction_log DROP COLUMN three_way_shadow" )
+    older.commit()
+    older.close()
+    engine = create_engine( f"sqlite:///{world[ 'archive' ]}" )
+    assert arm.add_missing_columns( engine, models=( Notification, ) ) == [], "a table not named is left alone"
+    assert arm.add_missing_columns( engine, models=( PredictionLog, ) ) == [ "prediction_log.three_way_shadow" ]
+    engine.dispose()
