@@ -30,7 +30,7 @@ def inputs( folder, count=10, differ=( "p01", "p02" ) ):
 
     Reader two flips material_error on the pairs named in differ, and differs in kind alone on p03.
     """
-    cards = [ { "notification_id": f"n{i:02d}", "response_type": "yes_no", "message": f"Run job {i}?", "abstract": None,
+    cards = [ { "pair_id": f"p{i:02d}", "notification_id": f"n{i:02d}", "field_key": "answer", "actual_text": f"job {i}", "response_type": "yes_no", "message": f"Run job {i}?", "abstract": None,
                 "options": None, "answer": f"yes [comment: only on test, job {i}]", "arm": "SECRET-ARM" } for i in range( count ) ]
     forecasts = [ { "pair_id": f"p{i:02d}", "notification_id": f"n{i:02d}", "field_key": "answer", "predicted_text": f"on dev {i}", "model": "SECRET-MODEL" }
                   for i in range( count ) ]
@@ -62,14 +62,14 @@ def test_the_join_keeps_only_the_shown_fields_so_no_arm_or_model_reaches_a_page(
     assert "SECRET" not in html
 
 
-@pytest.mark.parametrize( "name,rows,said", [
-    ( "forecasts", [ { "pair_id": "p00", "notification_id": "n00", "field_key": "answer", "predicted_text": "x" } ] * 2, "appears twice" ),
-    ( "forecasts", [ { "pair_id": "p00", "notification_id": "gone", "field_key": "answer", "predicted_text": "x" } ], "not in the answers file" ),
-    ( "forecasts", [], "holds no pairs" ),
+@pytest.mark.parametrize( "rows,said", [
+    ( [ { "pair_id": "p00", "field_key": "answer", "predicted_text": "x" } ] * 2, "appears twice" ),
+    ( [ { "pair_id": "gone", "field_key": "answer", "predicted_text": "x" } ], "held by only one file: 3" ),
+    ( [], "holds no pairs" ),
 ] )
-def test_a_forecasts_file_that_does_not_join_is_refused( tmp_path, name, rows, said ):
+def test_a_forecasts_file_that_does_not_join_is_refused( tmp_path, rows, said ):
     paths = inputs( tmp_path, count=2, differ=() )
-    write_lines( tmp_path / f"{name}.jsonl", rows )
+    write_lines( tmp_path / "forecasts.jsonl", rows )
 
     with pytest.raises( er.LabellingError, match=said ):
         pp.read_pairs( paths[ "answers" ], paths[ "forecasts" ] )

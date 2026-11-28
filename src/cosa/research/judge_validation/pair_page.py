@@ -36,30 +36,33 @@ READER_FIELDS     = ( "material_error", "kind", "atom", "note" )
 
 def read_pairs( answers_path, forecasts_path ):
     """
-    Join the forecasts to the cards and answers they are about.
+    Join each forecast to the card and answer it is about.
 
     Requires:
-        - answers_path has one JSON line per card: notification_id, response_type, message, abstract, options, answer
-        - forecasts_path has one JSON line per pair: pair_id, notification_id, field_key, predicted_text
+        - answers_path has one JSON line per pair: pair_id, response_type, message, abstract, options, answer
+        - forecasts_path has one JSON line per pair: pair_id, field_key, predicted_text
 
     Ensures:
         - returns { pair_id: row } where a row holds both files' fields
         - no other field of either file is carried, so an arm or a model cannot reach the page
 
     Raises:
-        - LabellingError BAD_ITEM for no pairs, a repeated pair id, or a pair whose card is not in the answers file
+        - LabellingError BAD_ITEM for no pairs, a pair id repeated in either file, or a pair that only one of the files holds
         - OSError, ValueError or KeyError for a file that cannot be read as stated
     """
-    cards = { row[ "notification_id" ]: row for row in jsonl_file.read_jsonl( answers_path ) }
-    pairs = {}
-    for row in jsonl_file.read_jsonl( forecasts_path ):
-        pair_id, card = row[ "pair_id" ], cards.get( row[ "notification_id" ] )
-        if pair_id in pairs: raise er.LabellingError( er.BAD_ITEM, f"pair id {pair_id} appears twice" )
-        if card is None: raise er.LabellingError( er.BAD_ITEM, f"pair {pair_id}: its card is not in the answers file" )
-        pairs[ pair_id ] = { "pair_id": pair_id, "field_key": row[ "field_key" ], "predicted_text": row[ "predicted_text" ],
-                             **{ key: card[ key ] for key in ( "response_type", "message", "abstract", "options", "answer" ) } }
-    if not pairs: raise er.LabellingError( er.BAD_ITEM, "the forecasts file holds no pairs" )
-    return pairs
+    held = []
+    for path in ( answers_path, forecasts_path ):
+        rows  = jsonl_file.read_jsonl( path )
+        by_id = { row[ "pair_id" ]: row for row in rows }
+        if len( by_id ) != len( rows ): raise er.LabellingError( er.BAD_ITEM, f"{path}: a pair id appears twice" )
+        held.append( by_id )
+    cards, forecasts = held
+    if not forecasts: raise er.LabellingError( er.BAD_ITEM, "the forecasts file holds no pairs" )
+    odd = sorted( set( cards ) ^ set( forecasts ) )
+    if odd: raise er.LabellingError( er.BAD_ITEM, f"pairs held by only one file: {len( odd )}, for example {odd[ :3 ]}" )
+    return { pair_id: { "pair_id": pair_id, "field_key": row[ "field_key" ], "predicted_text": row[ "predicted_text" ],
+                        **{ key: cards[ pair_id ][ key ] for key in ( "response_type", "message", "abstract", "options", "answer" ) } }
+             for pair_id, row in forecasts.items() }
 
 
 def read_reader( path, pair_ids ):
