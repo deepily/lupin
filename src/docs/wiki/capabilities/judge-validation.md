@@ -28,6 +28,13 @@ The answer judge says whether a forecast keeps every restriction of the real ans
 - The report also splits agreement, per arm and card type, by whether the forecast refers to an earlier answer.
 - `flips` runs 24 minimal pairs, once per judge identity and set. Keep those pairs for that run alone.
 
+## Rick's page (`pair_page`)
+- `main` builds one offline HTML page from `draw`'s two reader files and the two readers' labels. It writes a receipt beside it and never overwrites a page.
+- `read_pairs` joins the two reader files by pair id and carries no arm or model. `read_reader` refuses labels that do not cover every pair once.
+- Section A is `draw_blind`'s seeded 20%, shown with no reader label. Section B is `disputed_ids`, every pair where the readers differ on `material_error`.
+- A pair in both sections shows its reader labels only after the blind answer. Showing them locks that answer, across reload and restore. Use one tab: a second tab opened earlier could overwrite the lock.
+- `page_items` also says what both sides already agree on. `options_text` and `answer_text` write the stored options and answer as lines, and `render_page` fills the template with `rick_page.fill_page` ([[labelling-rick-page]]).
+
 ## The test fixtures (`capture`)
 - `capture.py` runs fixture cases, kept apart from the 24 pairs, on the real model. It commits the prompts and replies under `src/tests/fixtures/answer_judge/`.
 - Its replay refuses any request it did not record, apart from the random tag suffix.
