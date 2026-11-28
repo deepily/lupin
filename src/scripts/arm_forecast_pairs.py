@@ -279,8 +279,9 @@ def _joined( value ):
     return str( value )
 
 
-# A forecast that points at what the person answered before tells a reader that its arm saw history.
-EARLIER_ANSWER = re.compile( r"\b(earlier|previous|previously|prior)\b|\b(as|like) (before|last time|usual)\b|\bas (they|the owner) did\b", re.IGNORECASE )
+# Chloé's wider review pattern, 27 Nov. A diagnostic only: it misses some references and catches some ordinary words.
+EARLIER_ANSWER = re.compile( r"\bearlier\b|\bpreviously\b|\bconsistently\b|\balready (chose|ruled|said|asked)|(their|the) (usual |earlier |past |prior )?pattern|\bprecedent|"
+                             r"\bprinciples?\b|past (answers?|choices|decisions)|previous(ly)? (answer|chose|said|picked|ruled)", re.IGNORECASE )
 
 
 def refers_to_earlier( predicted ):
@@ -291,7 +292,7 @@ def refers_to_earlier( predicted ):
         - predicted is a string or None
 
     Ensures:
-        - returns True when the text holds one of EARLIER_ANSWER's phrases; it is a word match, so it can also catch an "earlier" about something else
+        - returns True when the text holds one of EARLIER_ANSWER's phrases; it is a word match, a diagnostic that nothing is excluded on
     """
     return bool( predicted and EARLIER_ANSWER.search( predicted ) )
 
@@ -410,7 +411,7 @@ def make_pairs( cards, forecasts, models ):
     Ensures:
         - returns ( pairs, key ); pairs are sorted by pair id and never name an arm or a model
         - literal_mismatch is True when the two texts differ after stripping and lower-casing, None counting as empty
-        - refers_to_earlier is refers_to_earlier of the predicted text, so such a pair can be left out of a blinded draw
+        - refers_to_earlier is refers_to_earlier of the predicted text, reported and never used to exclude a pair
         - a yes/no or multiple-choice pair also carries option_mismatch; the other types have no options and no such key
         - key maps each pair id to { arm, model }
         - a forecast of a card not in cards makes nothing

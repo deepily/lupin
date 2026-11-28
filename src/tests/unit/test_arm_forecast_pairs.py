@@ -187,7 +187,8 @@ def test_a_batch_field_with_no_gist_makes_no_row_even_with_conditions():
 
 
 @pytest.mark.parametrize( "said, points_back", [
-    ( "yes, as in earlier answers", True ), ( "the same as their Previous pick", True ), ( "declines like last time", True ), ( "approves, as the owner did", True ),
+    ( "yes, as in Earlier answers", True ), ( "previously declined", True ), ( "consistently picks the safe one", True ), ( "they already ruled on it", True ),
+    ( "follows their usual pattern", True ), ( "that precedent holds", True ), ( "per the principle", True ), ( "like past choices", True ), ( "as in the previous answer", True ),
     ( "ship it before lunch", False ), ( None, False ),
 ] )
 def test_refers_to_earlier( said, points_back ):
