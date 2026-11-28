@@ -5,7 +5,7 @@ pins:
   - cosa.agents.prediction_engine.principle_retrieval.supporting_rows@4799fd492a
   - cosa.agents.prediction_engine.principle_retrieval.latest_caveat@fa94a2363f
   - cosa.agents.prediction_engine.principle_retrieval.clean_caveat@3d050322f2
-  - cosa.agents.prediction_engine.principle_retrieval.applicability_rules@66d16928e3
+  - cosa.agents.prediction_engine.principle_retrieval.applicability_rules@42d7ad6241
   - cosa.agents.prediction_engine.card_stage.card_stage_of@81efdf6c81
   - cosa.agents.prediction_engine.card_stage.question_text@37a21e9fa7
 ---

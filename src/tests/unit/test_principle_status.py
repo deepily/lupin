@@ -20,8 +20,8 @@ import pytest
 
 from cosa.agents.prediction_engine.history_context_rebuild import answer_known_at_ask
 from cosa.agents.prediction_engine import principle_status
-from cosa.agents.prediction_engine.principle_status import ( CONDITION_KEYS_SWITCH, CONTESTED, ESTABLISHED, HYPOTHESIS, RETRACTED, compute_condition_key, derive_statuses,
-                                                              normalise_key, usable_at )
+from cosa.agents.prediction_engine.principle_status import ( CONDITION_KEYS_SWITCH, CONTESTED, ESTABLISHED, HYPOTHESIS, RETRACTED, StatusesOnRead, compute_condition_key,
+                                                              derive_statuses, normalise_key, rows_by_principle, status_deriver, usable_at )
 
 ASK  = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 HOUR = timedelta( hours=1 )
@@ -527,3 +527,67 @@ def test_after_a_ruling_a_later_contradiction_contests_by_stored_key():
     on  = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ]
     off = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=False )[ "p1" ]
     assert on[ "status" ] == CONTESTED and off[ "status" ] != CONTESTED and on[ "ruled" ] is True
+
+
+class CountedRow( SimpleNamespace ):
+    """An evidence row that counts how often its principle_id is read."""
+
+    reads = 0
+
+    @property
+    def principle_id( self ):
+        CountedRow.reads += 1
+        return self.owner_principle
+
+
+def counted( pid, note ):
+    """Build a counted supporting row for one principle."""
+    fields = vars( row( pid=pid, note=note ) )
+    fields[ "owner_principle" ] = fields.pop( "principle_id" )
+    return CountedRow( **fields )
+
+
+def test_rows_by_principle_keeps_the_order_and_names_only_principles_with_rows():
+    """Each principle's rows stay in the order given, and a principle without a row has no key."""
+    rows    = [ row( pid="b", note="n1" ), row( pid="a", note="n2" ), row( pid="b", note="n3" ) ]
+    grouped = rows_by_principle( rows )
+    assert [ r.notification_id for r in grouped[ "b" ] ] == [ "n1", "n3" ]
+    assert list( grouped ) == [ "b", "a" ]
+    assert rows_by_principle( [] ) == {}
+
+
+def test_deriving_every_status_reads_each_evidence_row_a_fixed_number_of_times():
+    """
+    The work grows with principles plus rows, not with their product.
+
+    Fifty principles with one row each must read principle_id once per row, however many principles there are.
+    A per-principle scan of the rows would read it 2,500 times.
+    """
+    principles      = [ principle( f"p{n}" ) for n in range( 50 ) ]
+    rows            = [ counted( f"p{n}", "n1" ) for n in range( 50 ) ]
+    CountedRow.reads = 0
+    result          = derive_statuses( principles, rows, ASK, V1, session_of, condition_keys=False, source_dedup=False )
+    assert CountedRow.reads == 50
+    assert { r[ "status" ] for r in result.values() } == { HYPOTHESIS }
+
+
+def test_the_deriver_gives_each_principle_what_derive_statuses_gives_it():
+    """One principle derived alone reads as in the whole run, an inherited ruling included."""
+    principles = [ principle( "p1", V1 ), principle( "p9", V1, continues="p1" ), principle( "p7" ) ]
+    evidence   = [ row( pid="p1" ), row( pid="p9", note="n2" ), ruling( pid="p1", relation="contradicts" ) ]
+    whole      = derive_statuses( principles, evidence, ASK, V1, session_of, condition_keys=False, source_dedup=False )
+    one        = status_deriver( principles, evidence, ASK, V1, session_of, condition_keys=False, source_dedup=False )
+    on_read    = StatusesOnRead( principles, one )
+    assert [ one( p ) for p in principles ] == [ whole[ p.id ] for p in principles ]
+    assert on_read.get( "p9" )[ "status" ] == RETRACTED
+    assert on_read.get( "p7" ) is None
+    assert on_read.get( "ghost" ) is None
+
+
+def test_statuses_on_read_derives_only_what_is_asked_for():
+    """Nothing is derived until a principle is asked for, and then only that one."""
+    asked   = []
+    on_read = StatusesOnRead( [ principle( "p1" ), principle( "p2" ) ], lambda p: asked.append( p.id ) )
+    assert asked == []
+    on_read.get( "p2" )
+    assert asked == [ "p2" ]

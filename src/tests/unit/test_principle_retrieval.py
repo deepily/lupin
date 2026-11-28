@@ -642,3 +642,76 @@ def test_an_antecedent_quote_on_an_uninformative_or_contradicting_row_drops_the_
     assert rules_for( [ support( uid( 1 ) ), support( uid( 1 ), antecedent="re-spin", relation="uninformative" ) ] ) == {}
     assert rules_for( [ support( uid( 1 ), antecedent="deploy", relation="contradicts" ) ] ) == { uid( 1 ): "antecedent" }
     assert pr.supporting_rows( uid( 1 ), rows, ASK, EXT ) == rows[ :1 ] and pr.supporting_rows( uid( 1 ), rows, ASK, EXT, relations=None ) == rows
+
+
+def derived_ids( monkeypatch ):
+    """Record which principles retrieval derives a status for."""
+    asked = []
+    real  = pr.status_deriver
+    def spy( *args, **kwargs ):
+        status_of = real( *args, **kwargs )
+        return lambda principle: ( asked.append( principle.id ), status_of( principle ) )[ 1 ]
+    monkeypatch.setattr( pr, "status_deriver", spy )
+    return asked
+
+
+def test_only_the_candidates_walked_are_derived( db, monkeypatch ):
+    """Statuses are derived down the cosine order until k are kept, a dropped one included."""
+    asked = derived_ids( monkeypatch )
+    ps    = [ add_principle( db, n, embedding=vec( 20 - n, n ) ) for n in range( 1, 13 ) ]
+    for n, p in enumerate( ps, 1 ):
+        add_evidence( db, p, n, session_key=f"s{n}" )
+    add_evidence( db, ps[ 0 ], 99, relation="contradicts", session_key="s99" )
+    result = retrieve( db, k=3 )
+    assert statements( result ) == [ "statement 2", "statement 3", "statement 4" ]
+    assert asked == [ p.id for p in ps[ :4 ] ]
+
+
+def test_too_few_usable_principles_walks_every_candidate( db, monkeypatch ):
+    """With fewer than k usable, every candidate is derived and the result says short."""
+    asked = derived_ids( monkeypatch )
+    ps    = [ add_principle( db, n ) for n in range( 1, 7 ) ]
+    add_evidence( db, ps[ 5 ], 1, session_key="s1" )
+    result = retrieve( db, k=5 )
+    assert result[ "short" ] is True and statements( result ) == [ "statement 6" ]
+    assert len( asked ) == 6
+
+
+def test_a_ruling_on_a_principle_outside_the_walk_still_reaches_the_one_inside( db ):
+    """
+    A ruling two continuations back reaches a candidate through non-candidates.
+
+    One step back would be found from the candidate's own link; two steps need the owner's whole list.
+    """
+    first  = add_principle( db, 1, scope="project:other" )
+    middle = add_principle( db, 2, scope="project:other" )
+    later  = add_principle( db, 3 )
+    middle.continues_principle_id = first.id
+    later.continues_principle_id  = middle.id
+    db.commit()
+    add_evidence( db, later, 2, session_key="s2" )
+    assert statements( retrieve( db ) ) == [ "statement 3" ]
+    add_evidence( db, first, 1, relation="contradicts", source="review_card", session_key="s1" )
+    assert retrieve( db )[ "principles" ] == []
+
+
+class CountedEvidence( SimpleNamespace ):
+    """An evidence row that counts how often its principle_id is read."""
+
+    reads = 0
+
+    @property
+    def principle_id( self ):
+        CountedEvidence.reads += 1
+        return self.owner_principle
+
+
+def test_applicability_rules_read_each_evidence_row_a_fixed_number_of_times():
+    """The rows are grouped once, so fifty principles do not each scan fifty rows."""
+    principles = [ SimpleNamespace( id=n ) for n in range( 50 ) ]
+    rows       = [ CountedEvidence( owner_principle=n, source="extractor", extractor_version=EXT, relation="supports", antecedent="never there", decision_stage=None,
+                                    answered_at=ASK - HOUR, extracted_at=ASK - HOUR, retracted_at=None ) for n in range( 50 ) ]
+    CountedEvidence.reads = 0
+    rules      = pr.applicability_rules( principles, rows, ASK, EXT, "a card", None )
+    assert rules == { n: pr.RULE_ANTECEDENT for n in range( 50 ) }
+    assert CountedEvidence.reads <= 150
