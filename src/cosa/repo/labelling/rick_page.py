@@ -7,6 +7,7 @@ the list it was built from. rick_export reads his answers back.
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import random
 import sys
@@ -146,6 +147,41 @@ def merge_sections( sections ):
     return kept, sorted( dropped )
 
 
+def questions_of( packet ):
+    """
+    Name the one question each item of a multi-question card labels.
+
+    A multiple-choice or batch card gives one item per answered question. Each item's card text is the card's shared
+    text followed by that question's own wording. The page shows one of those items. Without a name, the reader sees
+    every question of the card above a single answer and cannot tell which one it answers.
+
+    Requires:
+        - packet is { blind, disputes, refs }, refs mapping an item id to { notification_id, field_key }
+
+    Ensures:
+        - returns { item_id: question } for every item whose card has two or more items in the packet
+        - question is { header, prompt, answered }: header is the item's field_key, answered the card's item count, and
+          prompt the item's card text after the longest prefix its card's texts share, cut back to a line start, or None
+          when that remainder is blank
+        - an item with no ref, or the only item of its card, has no entry
+        - only notification_id and field_key are read from a ref, and only the header reaches the page
+    """
+    refs, cards = packet[ "refs" ], {}
+    for item in packet[ "blind" ] + packet[ "disputes" ]:
+        ref = refs.get( item[ "item_id" ] )
+        if ref is not None: cards.setdefault( ref[ "notification_id" ], [] ).append( item )
+    out = {}
+    for group in cards.values():
+        if len( group ) < 2: continue
+        texts  = [ i[ "payload" ][ "card_text" ] for i in group ]
+        shared = os.path.commonprefix( texts )
+        shared = shared[ :shared.rfind( "\n" ) + 1 ]
+        for item in group:
+            prompt = item[ "payload" ][ "card_text" ][ len( shared ): ].strip()
+            out[ item[ "item_id" ] ] = { "header": refs[ item[ "item_id" ] ][ "field_key" ], "prompt": prompt or None, "answered": len( group ) }
+    return out
+
+
 def page_items( packet, sections, card_types ):
     """
     Turn the sections of item ids into what the page embeds.
@@ -155,8 +191,9 @@ def page_items( packet, sections, card_types ):
         - card_types is a dict from item id to a key of CARD_TYPE_LABELS, as item-card-types.json holds it, with an entry for every id
 
     Ensures:
-        - returns one dict per id, the first section first and each section in sorted order: item_id, section, card_type (the label Rick reads), card_text, options, recommendation, answer, stance_class and relations ( label, meaning )
-        - nothing else rides along: each item passes blind_form, which refuses a forecast, a label or any other field, and the refs are never read
+        - returns one dict per id, the first section first and each section in sorted order: item_id, section, card_type (the label Rick reads), card_text, options, recommendation, answer, stance_class, question and relations ( label, meaning )
+        - question is questions_of's entry for an item of a multi-question card, else None
+        - nothing else rides along: each item passes blind_form, which refuses a forecast, a label or any other field, and from the refs only what questions_of reads is used
 
     Raises:
         - LabellingError BAD_ITEM for no ids, an id the packet does not hold, or an id with no card type or one that is not a key of CARD_TYPE_LABELS
@@ -169,11 +206,13 @@ def page_items( packet, sections, card_types ):
     if absent: raise er.LabellingError( er.BAD_ITEM, f"item ids the packet does not hold: {absent[ :5 ]}" )
     untyped = sorted( i for i in ids if card_types.get( i ) not in CARD_TYPE_LABELS )
     if untyped: raise er.LabellingError( er.BAD_ITEM, f"item ids with no known card type: {untyped[ :5 ]}" )
-    out = []
+    out       = []
+    questions = questions_of( packet )
     for name, group in sections.items():
         for item_id in group:
             item = pk.blind_form( known[ item_id ] )
-            out.append( { "item_id": item_id, "section": name, "card_type": CARD_TYPE_LABELS[ card_types[ item_id ] ], **item[ "payload" ], "relations": [ { "label": l, "meaning": MEANINGS[ l ] } for l in relations_for( item ) ] } )
+            out.append( { "item_id": item_id, "section": name, "card_type": CARD_TYPE_LABELS[ card_types[ item_id ] ], **item[ "payload" ], "question": questions.get( item_id ),
+                          "relations": [ { "label": l, "meaning": MEANINGS[ l ] } for l in relations_for( item ) ] } )
     return out
 
 
@@ -207,6 +246,8 @@ def render_page( items, title ):
     Ensures:
         - returns the HTML text of a page with the items embedded and no reference to any outside script, style, font or address
         - the title is written as escaped text; the page id is the one page_id gives for the item ids
+        - the page's grouped view orders card types as CARD_TYPE_LABELS does
+        - the items are embedded last, so card text that quotes a placeholder reaches the page unchanged
 
     Raises:
         - LabellingError BAD_ITEM for no items or a blank title
@@ -215,7 +256,8 @@ def render_page( items, title ):
     template = pathlib.Path( cu.get_project_root() + TEMPLATE_RELATIVE ).read_text( encoding="utf-8" )
     safe     = title.replace( "&", "&amp;" ).replace( "<", "&lt;" ).replace( ">", "&gt;" )
     ids      = [ i[ "item_id" ] for i in items ]
-    return template.replace( "__TITLE__", safe ).replace( "__PAGE_ID__", page_id( ids ) ).replace( "__ITEMS_JSON__", embed_json( items ) )
+    filled   = template.replace( "__TITLE__", safe ).replace( "__PAGE_ID__", page_id( ids ) ).replace( "__TYPE_ORDER_JSON__", embed_json( list( CARD_TYPE_LABELS.values() ) ) )
+    return filled.replace( "__ITEMS_JSON__", embed_json( items ) )   # items last: a card that quotes a placeholder is never filled in
 
 
 def main( argv=None ):

@@ -9,6 +9,7 @@
   header { position: sticky; top: 0; z-index: 2; background: #1d1d1b; color: #fff; padding: 5px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
   #section { background: #e8e8e2; padding: 3px 12px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
   #cardtype { background: #1d6fd1; color: #fff; border-radius: 10px; padding: 0 8px; font-weight: 600; white-space: nowrap; }
+  #grouping { font-size: 12px; padding: 1px 8px; }
   main { max-width: 900px; margin: 0 auto; padding: 6px 12px 40px; }
   .card { background: #fff; border: 1px solid #d8d8d2; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; }
   #cardtext { height: 30vh; min-height: 80px; }
@@ -16,6 +17,7 @@
   .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #66665f; margin: 2px 0 2px; }
   .answer { background: #fff7d6; border-color: #e3c85c; font-size: 15px; }
   .rec { color: #0a6b2f; font-weight: 600; }
+  .qbox { background: #fff4c2; border-color: #e0b400; font-weight: 600; }
   button { font-size: 13px; padding: 5px 9px; border-radius: 6px; border: 1px solid #9a9a92; background: #fff; }
   #relations { display: grid; grid-template-columns: 1fr; gap: 4px; }
   .rel { text-align: left; }
@@ -34,7 +36,7 @@
 </style>
 </head>
 <body>
-<header><span id="pos"></span><span id="done"></span></header>
+<header><span id="pos"></span><button id="grouping"></button><span id="done"></span></header>
 <div id="section"><span id="sectiontext"></span><span id="cardtype"></span></div>
 <main>
   <div class="label">Card</div>
@@ -42,6 +44,7 @@
   <div id="optionsbox"><div class="label">Options</div><div class="card small" id="options"></div></div>
   <div class="label">Recommended</div>
   <div class="card small" id="recommendation"></div>
+  <div id="questionbox"><div class="label">Question being labelled</div><div class="card qbox" id="question"></div></div>
   <div class="label">Rick's answer</div>
   <div class="card answer small" id="answer"></div>
   <div class="label">How does the answer relate to the card?</div>
@@ -71,9 +74,10 @@
 "use strict";
 var PAGE_ID  = "__PAGE_ID__";
 var ITEMS    = JSON.parse( document.getElementById( "data" ).textContent );
+var TYPES    = __TYPE_ORDER_JSON__;   // card-type labels in the order the grouped view shows them
 var KEY      = "rick-gold:" + PAGE_ID;
 var MAX_IDLE = 300;   // seconds counted for one stretch on one item; a longer stretch is a walk away from the page
-var store    = { answers: {}, position: 0 };
+var store    = { answers: {}, position: 0, grouped: false };
 var shownAt  = Date.now();
 var position = 0;
 
@@ -95,19 +99,34 @@ function sectionSize( name ) { return ITEMS.filter( function ( i ) { return i.se
 function sectionDone( name ) { return ITEMS.filter( function ( i ) { return i.section === name && store.answers[ i.item_id ]; } ).length; }
 function doneCount() { return Object.keys( store.answers ).length; }
 function setText( id, text ) { document.getElementById( id ).textContent = text; }
+function typeRank( item ) { var r = TYPES.indexOf( item.card_type ); return r < 0 ? TYPES.length : r; }
+function order() {   // item indexes in the order Back and Next walk: as drawn, or grouped by card type keeping the drawn order inside a type
+  var all = ITEMS.map( function ( _, i ) { return i; } );
+  if ( !store.grouped ) return all;
+  return all.sort( function ( a, b ) { return typeRank( ITEMS[ a ] ) - typeRank( ITEMS[ b ] ) || a - b; } );
+}
+function rank() { return order().indexOf( position ); }
+function step( n ) { var o = order(), r = o.indexOf( position ) + n; if ( r >= 0 && r < o.length ) go( o[ r ] ); }
+function typeSize( type ) { return ITEMS.filter( function ( i ) { return i.card_type === type; } ).length; }
+function typeDone( type ) { return ITEMS.filter( function ( i ) { return i.card_type === type && store.answers[ i.item_id ]; } ).length; }
+function toggleGrouping() { store.grouped = !store.grouped; show(); }
 
 function show() {
   var item = ITEMS[ position ], entry = store.answers[ item.item_id ];
-  setText( "pos", "Item " + ( position + 1 ) + " of " + ITEMS.length );
+  setText( "pos", "Item " + ( rank() + 1 ) + " of " + ITEMS.length );
+  setText( "grouping", store.grouped ? "Order: by card type" : "Order: as drawn" );
   setText( "done", doneCount() + " of " + ITEMS.length + " done" );
   setText( "sectiontext", item.section + " (" + sectionDone( item.section ) + " of " + sectionSize( item.section ) + " done)" );
-  setText( "cardtype", item.card_type );
+  setText( "cardtype", item.card_type + " \u00b7 " + typeDone( item.card_type ) + " of " + typeSize( item.card_type ) + " done" );
   setText( "cardtext", item.card_text );
   document.getElementById( "optionsbox" ).style.display = item.options.length ? "block" : "none";
   setText( "options", item.options.join( "\n" ) );
   var rec = document.getElementById( "recommendation" );
   rec.textContent = item.recommendation === null ? "none on this card" : item.recommendation;
   rec.className = item.recommendation === null ? "card" : "card rec";
+  var q = item.question;
+  document.getElementById( "questionbox" ).style.display = q ? "block" : "none";
+  setText( "question", q ? q.header + ( q.prompt ? ": " + q.prompt : "" ) + "\n(" + q.answered + " of this card's questions were answered. Only this question's answer is shown, and it is the one to label.)" : "" );
   setText( "answer", item.answer );
   var box = document.getElementById( "relations" );
   box.textContent = "";
@@ -144,8 +163,9 @@ function go( to ) {
   window.scrollTo( 0, 0 );
 }
 function nextOpen() {
-  for ( var n = 1; n <= ITEMS.length; n++ ) {
-    var at = ( position + n ) % ITEMS.length;
+  var o = order(), r = o.indexOf( position );
+  for ( var n = 1; n <= o.length; n++ ) {
+    var at = o[ ( r + n ) % o.length ];
     if ( !store.answers[ ITEMS[ at ].item_id ] ) { go( at ); return; }
   }
   setText( "exportstatus", "Every item has an answer. Export below." );
@@ -211,8 +231,9 @@ function copyText() {
   setText( "exportstatus", "Text selected. Use Copy in your browser's menu." );
 }
 
-document.getElementById( "prev" ).onclick     = function () { go( position - 1 ); };
-document.getElementById( "next" ).onclick     = function () { go( position + 1 ); };
+document.getElementById( "prev" ).onclick     = function () { step( -1 ); };
+document.getElementById( "next" ).onclick     = function () { step( 1 ); };
+document.getElementById( "grouping" ).onclick = toggleGrouping;
 document.getElementById( "nextopen" ).onclick = nextOpen;
 document.getElementById( "download" ).onclick = download;
 document.getElementById( "copy" ).onclick     = copyText;

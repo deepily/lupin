@@ -9,6 +9,7 @@ import pytest
 from cosa.repo.labelling import errors as er
 from cosa.repo.labelling import items as it
 from cosa.repo.labelling import rick_page as rp
+import cosa.utils.util as cu
 
 
 def card_item( item_id, stance="yes", options=None, recommendation=None, answer="yes", text="Question?" ):
@@ -112,7 +113,7 @@ def test_the_page_items_follow_section_then_sorted_order_and_carry_their_relatio
     packet = packet_of( 6, 2 )
     out    = rp.page_items( packet, { "blind share": [ "card-003:1", "card-001:0" ], "reader disagreements": [ "card-000:0" ] }, types_of( packet ) )
     assert [ ( o[ "item_id" ], o[ "section" ] ) for o in out ] == [ ( "card-003:1", "blind share" ), ( "card-001:0", "blind share" ), ( "card-000:0", "reader disagreements" ) ]
-    assert set( out[ 0 ] ) == { "item_id", "section", "card_type", "card_text", "options", "recommendation", "answer", "stance_class", "relations" }
+    assert set( out[ 0 ] ) == { "item_id", "section", "card_type", "card_text", "options", "recommendation", "answer", "stance_class", "question", "relations" }
     assert [ r[ "label" ] for r in out[ 0 ][ "relations" ] ] == rp.relations_for( next( i for i in packet[ "blind" ] if i[ "item_id" ] == "card-003:1" ) ) and out[ 0 ][ "recommendation" ] == "A"
     assert out[ 1 ][ "relations" ][ 0 ] == { "label": "support", "meaning": rp.MEANINGS[ "support" ] }
 
@@ -146,7 +147,7 @@ def test_the_rendered_page_holds_its_items_and_reaches_for_nothing_outside():
     packet = packet_of( 6, 2 )
     items  = rp.page_items( packet, { "s": [ i[ "item_id" ] for i in packet[ "blind" ] ] }, types_of( packet ) )
     html   = rp.render_page( items, "A <b>title</b> & more" )
-    for token in ( "__TITLE__", "__PAGE_ID__", "__ITEMS_JSON__" ): assert token not in html
+    for token in ( "__TITLE__", "__PAGE_ID__", "__ITEMS_JSON__", "__TYPE_ORDER_JSON__" ): assert token not in html
     assert "<title>A &lt;b&gt;title&lt;/b&gt; &amp; more</title>" in html
     assert f'var PAGE_ID  = "{rp.page_id( [ i[ "item_id" ] for i in items ] )}"' in html
     data = re.search( r'<script type="application/json" id="data">(.*?)</script>', html, re.S ).group( 1 )
@@ -283,3 +284,116 @@ def test_main_embeds_the_card_types_and_refuses_a_missing_or_short_or_odd_types_
             bad = [ "--card-types", str( tmp_path / "bad.json" ) ]
         assert rp.main( bad + [ "--packet", str( path ), "--section", f"s={ids}", "--out", str( out2 ) ] ) == 2
         assert not out2.exists() and "cannot build the page" in capsys.readouterr().err
+
+
+def batch_packet():
+    """
+    Return a packet shaped like a real batch card: card A asks four questions and card B one.
+
+    Each item's card text is the card's shared text plus its own question, as build_answer_card_sample writes it.
+    """
+    head    = "Missing arguments\nI have 4 questions for you. Question 1 of 4: budget? Question 2 of 4: languages?\n**Still needed**: budget, languages"
+    fields  = [ ( "budget", "Would you like a budget limit?", "no limit" ), ( "languages", "What languages for the podcast?", "en" ),
+                ( "audience", "Who is the target audience?", "academic" ), ( "audience_context", "Any context about the audience?", "none" ) ]
+    blind, refs = [], {}
+    for n, ( key, prompt, answer ) in enumerate( fields ):
+        item = card_item( f"card-A:{n}", stance="none", answer=answer, text=f"{head}\n{prompt}" )
+        blind.append( item )
+        refs[ item[ "item_id" ] ] = { "notification_id": "card-A", "field_key": key }
+    single = card_item( "card-B:0", stance="none", answer="sure", text="One question?" )
+    blind.append( single )
+    refs[ "card-B:0" ] = { "notification_id": "card-B", "field_key": "answer" }
+    return { "name": "batch", "blind": blind, "disputes": [], "refs": refs }
+
+
+def test_an_item_of_a_multi_question_card_names_its_own_question_and_a_single_card_names_none():
+    packet = batch_packet()
+    out    = { o[ "item_id" ]: o for o in rp.page_items( packet, { "s": [ "card-A:1", "card-A:3", "card-B:0" ] }, types_of( packet, "open_ended_batch" ) ) }
+    assert out[ "card-A:1" ][ "question" ] == { "header": "languages", "prompt": "What languages for the podcast?", "answered": 4 }
+    assert out[ "card-A:3" ][ "question" ] == { "header": "audience_context", "prompt": "Any context about the audience?", "answered": 4 }
+    assert out[ "card-A:1" ][ "answer" ] == "en"
+    assert out[ "card-B:0" ][ "question" ] is None
+
+
+def test_the_prompt_is_cut_at_a_line_start_and_none_when_nothing_follows_the_shared_text():
+    packet = batch_packet()
+    for i in packet[ "blind" ][ :2 ]: i[ "payload" ][ "card_text" ] = "Shared\nWhat is x?" if i[ "item_id" ].endswith( "0" ) else "Shared\nWhat is y?"
+    q = rp.questions_of( { **packet, "blind": packet[ "blind" ][ :2 ] } )
+    assert q[ "card-A:0" ][ "prompt" ] == "What is x?" and q[ "card-A:1" ][ "prompt" ] == "What is y?"
+    same = packet_of( 3, 2 )
+    assert rp.questions_of( same )[ "card-000:1" ] == { "header": "f1", "prompt": "Question?", "answered": 2 }
+    assert "card-001:0" not in rp.questions_of( same )
+    for i in same[ "blind" ][ :2 ]: i[ "payload" ][ "card_text" ] = "Shared\n"
+    assert rp.questions_of( same )[ "card-000:0" ][ "prompt" ] is None
+
+
+def test_an_item_with_no_ref_is_left_out_of_the_question_map():
+    packet = batch_packet()
+    del packet[ "refs" ][ "card-A:0" ]
+    q = rp.questions_of( packet )
+    assert "card-A:0" not in q and q[ "card-A:1" ][ "answered" ] == 3
+
+
+def test_naming_the_question_never_moves_the_page_id_so_saved_answers_carry_over():
+    packet = batch_packet()
+    ids    = [ "card-A:1", "card-B:0" ]
+    html   = rp.render_page( rp.page_items( packet, { "s": ids }, types_of( packet, "open_ended_batch" ) ), "t" )
+    assert re.search( r'PAGE_ID  = "(\w+)"', html ).group( 1 ) == rp.page_id( ids )
+
+
+def test_the_page_shows_the_question_box_only_for_an_item_that_names_one():
+    html = rp.render_page( page_of( batch_packet(), [ "card-A:1" ] ), "t" )
+    assert 'id="questionbox"' in html and 'id="question"' in html
+
+
+def drive( page ):
+    """Run rick_page_question_driver.js on a page file under node and return what it reports."""
+    import shutil, subprocess
+    if shutil.which( "node" ) is None: pytest.skip( "node is not installed" )
+    r = subprocess.run( [ "node", cu.get_project_root() + "/src/tests/unit/rick_page_question_driver.js", str( page ) ], capture_output=True, text=True, timeout=60 )
+    assert r.returncode == 0, r.stderr
+    return json.loads( r.stdout.strip().splitlines()[ -1 ] )
+
+
+def test_the_page_script_shows_the_box_with_the_question_for_a_multi_question_item_and_hides_it_otherwise( tmp_path ):
+    """Run the page script under node, so the box is judged by what show() does, not by the text."""
+    packet = batch_packet()
+    page   = tmp_path / "p.html"
+    page.write_text( rp.render_page( rp.page_items( packet, { "s": [ "card-A:1", "card-B:0" ] }, types_of( packet, "open_ended_batch" ) ), "t" ), encoding="utf-8" )
+    shown  = { o[ "item_id" ]: o for o in drive( page )[ "boxes" ] }
+    assert len( shown ) == 2
+    assert shown[ "card-A:1" ][ "display" ] == "block"
+    assert shown[ "card-A:1" ][ "text" ].startswith( "languages: What languages for the podcast?\n(4 of this card's questions were answered." )
+    assert shown[ "card-B:0" ][ "display" ] == "none" and shown[ "card-B:0" ][ "text" ] == ""
+
+
+def test_the_order_button_groups_like_card_types_together_keeping_the_drawn_order_inside_each( tmp_path ):
+    """Next walks the drawn order until the button is clicked, then one card type at a time."""
+    packet = packet_of( 6, 1 )
+    kinds  = [ "open_ended_batch", "yes_no", "open_ended_batch", "multiple_choice", "yes_no", "open_ended" ]
+    types  = { f"card-{c:03d}:0": k for c, k in enumerate( kinds ) }
+    ids    = sorted( types )
+    page   = tmp_path / "p.html"
+    page.write_text( rp.render_page( rp.page_items( packet, { "s": ids }, types ), "t" ), encoding="utf-8" )
+    out    = drive( page )
+    assert out[ "drawn" ][ "label" ] == "Order: as drawn" and out[ "drawn" ][ "ids" ] == ids
+    assert out[ "grouped" ][ "label" ] == "Order: by card type"
+    assert out[ "grouped" ][ "ids" ] == [ "card-001:0", "card-004:0", "card-003:0", "card-005:0", "card-000:0", "card-002:0" ]
+    assert out[ "grouped" ][ "badges" ][ :2 ] == [ "Yes / No / Neither \u00b7 0 of 2 done" ] * 2
+    assert out[ "grouped" ][ "badges" ][ -1 ] == "Batch (open-ended) \u00b7 0 of 2 done"
+    assert out[ "next_open" ] == "card-004:0" and out[ "grouped_saved" ] is True
+
+
+def test_the_grouped_view_orders_card_types_as_the_label_table_does():
+    html = rp.render_page( page_of( packet_of( 3, 1 ), [ "card-000:0" ] ), "t" )
+    assert "var TYPES    = " + rp.embed_json( list( rp.CARD_TYPE_LABELS.values() ) ) + ";" in html
+
+
+@pytest.mark.parametrize( "token", [ "__TYPE_ORDER_JSON__", "__PAGE_ID__", "__TITLE__" ] )
+def test_a_card_that_quotes_a_placeholder_reaches_the_page_unchanged( token ):
+    packet = packet_of( 3, 1 )
+    packet[ "blind" ][ 0 ][ "payload" ][ "card_text" ] = f"Should the page fill {token} before the items?"
+    items  = page_of( packet, [ "card-000:0" ] )
+    html   = rp.render_page( items, "t" )
+    data   = re.search( r'<script type="application/json" id="data">(.*?)</script>', html, re.S ).group( 1 )
+    assert json.loads( data ) == items and json.loads( data )[ 0 ][ "card_text" ] == f"Should the page fill {token} before the items?"
