@@ -58,6 +58,15 @@ def test_a_bad_input_writes_nothing( tmp_path, capsys, change, words ):
     assert words in capsys.readouterr().err and not ( tmp_path / "labels.jsonl" ).exists()
 
 
+def test_the_latest_answer_wins_whatever_order_the_export_lists_them( tmp_path ):
+    path  = tmp_path / "rick.json"
+    later = line( "agree", "A", "yes", "2026-11-27T12:00:00Z" )
+    early = line( "agree", "A", "no", "2026-11-27T08:00:00Z" )
+    for export in ( [ early, later ], [ later, early ] ):
+        path.write_text( json.dumps( export ) )
+        assert labels.read_export( path, { "agree" } )[ "A" ] == { "agree": True }
+
+
 def test_a_reader_who_labels_a_pair_twice_is_refused( tmp_path ):
     path = tmp_path / "r.jsonl"
     path.write_text( ( json.dumps( { "pair_id": "a", "material_error": True } ) + "\n" ) * 2 )
