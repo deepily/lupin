@@ -18,10 +18,11 @@ import json
 from claude_agent_sdk import query as sdk_query
 
 import cosa.utils.util as cu
+from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
 from cosa.utils.file_hash import file_sha256
 
-DEFAULT_MODEL         = "claude-opus-5-5"
+MODEL_KEY             = "principle learner answer judge model"
 RUBRIC_PATH           = "/src/conf/prompts/answer-judge-rubric.txt"
 NO_TEXT               = "(none)"
 ACTUAL_STATUSES       = ( "covered", "missing", "contradicted" )
@@ -144,18 +145,35 @@ def parse_verdict( reply, predicted_text, actual_text ):
     }
 
 
-def judge_identity( model=DEFAULT_MODEL, rubric_path=None ):
+def judge_model():
+    """
+    Read the model id the judge calls.
+
+    Requires:
+        - the INI file carries the key named by MODEL_KEY
+
+    Ensures:
+        - returns the id as a non-empty string, never a value written in code
+
+    Raises:
+        - MissingConfigKeyError if the key is missing or blank, so the call never falls back to another model
+    """
+    return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( MODEL_KEY, return_type="string" )
+
+
+def judge_identity( model=None, rubric_path=None ):
     """
     Name the judge by what it would send and how it would read the answer.
 
     Requires:
-        - model is a model id; rubric_path is None for the committed rubric, or a path to a rubric file
+        - model is a model id, or None for judge_model(); rubric_path is None for the committed rubric, or a path to a rubric file
 
     Ensures:
         - returns { model, rubric_sha256, prompt_sha256 }
         - rubric_sha256 is the sha256 of the rubric file's bytes
         - prompt_sha256 changes when the transport's call profile, the rubric, the prompt builder or the reader changes
     """
+    model  = model or judge_model()
     path   = rubric_path or cu.get_project_root() + RUBRIC_PATH
     rubric = cu.get_file_as_string( path )
     parts  = [ model_transport.CALL_PROFILE, rubric ] + [ inspect.getsource( f ) for f in ( build_user_prompt, _plain, _read_atoms, parse_verdict ) ]
@@ -204,12 +222,12 @@ def request_settings( options ):
     }
 
 
-def make_judge( model=DEFAULT_MODEL, complete=model_transport.complete_sync, query_fn=None, rubric_path=None, expected_identity=None ):
+def make_judge( model=None, complete=model_transport.complete_sync, query_fn=None, rubric_path=None, expected_identity=None ):
     """
     Build the judge( predicted_text, actual_text ) that the complete-action comparators call.
 
     Requires:
-        - model is a model id
+        - model is a model id, or None for judge_model()
         - complete has model_transport.complete_sync's signature ( model, system, user, query_fn=... )
         - query_fn is None for the SDK's query, or an async generator standing in for it
         - expected_identity is None, or a recorded judge_identity
@@ -225,6 +243,7 @@ def make_judge( model=DEFAULT_MODEL, complete=model_transport.complete_sync, que
         - JudgeHashMismatch when expected_identity differs from this judge's identity
         - the judge raises JudgeReplyError for an unreadable reply, and whatever complete raises
     """
+    model    = model or judge_model()
     path     = rubric_path or cu.get_project_root() + RUBRIC_PATH
     rubric   = cu.get_file_as_string( path )
     identity = judge_identity( model, path )

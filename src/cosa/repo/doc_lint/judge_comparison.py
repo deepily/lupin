@@ -147,12 +147,14 @@ def wrong_on( result, slot ):
     return harness_report.flagged( claim_list )
 
 
-def group_rows( results, keys, slots ):
+def group_rows( results, keys, slots, names=GROUPS, names_of=groups_of, wrong_of=wrong_on ):
     """
     Count the wrong verdicts per pair group, on the worse of the extractor lists.
 
     Requires:
         - results come from run_all; keys is key_rows output covering every result id; slots is the list count
+        - names lists the group names in table order, names_of maps one key to its names, and wrong_of takes
+          ( result, slot ); the defaults give the pair-type table
 
     Ensures:
         - returns one row per pair group that has pairs: group, expected (flagged or not flagged), n,
@@ -167,19 +169,19 @@ def group_rows( results, keys, slots ):
     Raises:
         - ValueError when a result has no key, or when a group mixes seeded and unseeded pairs
     """
-    members = { name: [] for name in GROUPS }
+    members = { name: [] for name in names }
     for r in results:
         if r[ "id" ] not in keys: raise ValueError( f"pair {r[ 'id' ]} has no key" )
-        for name in groups_of( keys[ r[ "id" ] ] ): members[ name ].append( r )
+        for name in names_of( keys[ r[ "id" ] ] ): members[ name ].append( r )
     rows = []
-    for name in GROUPS:
+    for name in names:
         group = members[ name ]
         if not group: continue
         seeded   = group[ 0 ][ "seed_span" ] is not None
         if any( ( r[ "seed_span" ] is not None ) != seeded for r in group ): raise ValueError( f"group {name!r} mixes pairs with and without a seeded removal" )
         empty    = [ r for r in group if r.get( "judge_skipped" ) and not seeded ]
         group    = [ r for r in group if r not in empty ]
-        per_list = [ sum( 1 for r in group if wrong_on( r, s ) ) for s in range( slots ) ]
+        per_list = [ sum( 1 for r in group if wrong_of( r, s ) ) for s in range( slots ) ]
         worst    = max( range( slots ), key=lambda s: ( per_list[ s ], -s ) )
         wrong    = per_list[ worst ]
         if not group:
