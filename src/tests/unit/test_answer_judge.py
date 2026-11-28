@@ -124,6 +124,17 @@ def test_changing_one_character_of_the_rubric_is_refused( tmp_path ):
         aj.make_judge( rubric_path=str( rubric ), expected_identity=recorded )
 
 
+@pytest.mark.parametrize( "owner, name", [
+    ( aj, "build_user_prompt" ), ( aj, "_plain" ), ( aj, "_read_atoms" ), ( aj, "parse_verdict" ), ( aj.model_transport, "wrap" ),
+    ( aj, "NO_TEXT" ), ( aj, "ACTUAL_STATUSES" ), ( aj, "PREDICTED_STATUSES" ), ( aj, "EVIDENCED_STATUSES" ),
+    ( aj.model_transport, "CALL_PROFILE" ) ] )
+def test_changing_anything_that_shapes_a_verdict_changes_the_identity( monkeypatch, owner, name ):
+    recorded = aj.judge_identity( "m" )
+    def changed( *args ): return "changed"
+    monkeypatch.setattr( owner, name, changed if callable( getattr( owner, name ) ) else "changed" )
+    assert aj.judge_identity( "m" )[ "prompt_sha256" ] != recorded[ "prompt_sha256" ]
+
+
 def test_another_model_is_refused():
     with pytest.raises( aj.JudgeHashMismatch, match="in model$" ):
         aj.make_judge( "model-y", expected_identity=aj.judge_identity( "model-x" ) )

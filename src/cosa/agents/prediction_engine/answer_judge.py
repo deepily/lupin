@@ -171,12 +171,15 @@ def judge_identity( model=None, rubric_path=None ):
     Ensures:
         - returns { model, rubric_sha256, prompt_sha256 }
         - rubric_sha256 is the sha256 of the rubric file's bytes
-        - prompt_sha256 changes when the transport's call profile, the rubric, the prompt builder or the reader changes
+        - prompt_sha256 changes when the transport's call profile or tag wrapper, the rubric, the prompt builder,
+          the reader, the word for an empty text or a status list changes
     """
     model  = model or judge_model()
     path   = rubric_path or cu.get_project_root() + RUBRIC_PATH
     rubric = cu.get_file_as_string( path )
-    parts  = [ model_transport.CALL_PROFILE, rubric ] + [ inspect.getsource( f ) for f in ( build_user_prompt, _plain, _read_atoms, parse_verdict ) ]
+    shaped = ( build_user_prompt, model_transport.wrap, _plain, _read_atoms, parse_verdict )
+    words  = repr( ( NO_TEXT, ACTUAL_STATUSES, PREDICTED_STATUSES, EVIDENCED_STATUSES ) )
+    parts  = [ model_transport.CALL_PROFILE, rubric, words ] + [ inspect.getsource( f ) for f in shaped ]
     return {
         "model"         : model,
         "rubric_sha256" : file_sha256( path ),

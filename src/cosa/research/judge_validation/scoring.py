@@ -207,6 +207,25 @@ def arm_bias( rows, key ):
                                         wrong_of=lambda result, slot: result[ "lists" ][ slot ] )
 
 
+def check_labels( labels ):
+    """
+    Refuse a label whose value is not a boolean or None.
+
+    Requires:
+        - labels rows hold pair_id and material_error, and may hold readers
+
+    Ensures:
+        - returns None when every material_error and every reader value is True, False or None
+
+    Raises:
+        - ValueError naming the pair and the value otherwise, so a word such as "no" is never read as true
+    """
+    for row in labels:
+        for value in [ row[ "material_error" ], *row.get( "readers", {} ).values() ]:
+            if value is not None and not isinstance( value, bool ):
+                raise ValueError( f"pair {row[ 'pair_id' ]}: a label must be true, false or null, not {value!r}" )
+
+
 def build_report( sample, verdicts, labels, key, recorded, current ):
     """
     Report the judge against the human labels and the pass line.
@@ -214,7 +233,7 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
     Requires:
         - sample rows come from draw.draw_sample
         - verdicts rows come from run_judge; labels rows hold pair_id and material_error (True, False, or None
-          for unresolved), and may hold readers, a { reader name: bool } map
+          for unresolved), and may hold readers, a { reader name: True, False or None } map
         - key is { pair_id: { arm, model } }; recorded and current are judge identities
 
     Ensures:
@@ -230,10 +249,11 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
 
     Raises:
         - answer_judge.JudgeHashMismatch when the current judge or any verdict row differs from the recorded one
-        - ValueError when a sampled pair has no verdict, no label line or no key
+        - ValueError when a sampled pair has no verdict, no label line or no key, or a label value is not a boolean or None
     """
     answer_judge.check_identity( recorded, current )
     for row in verdicts: answer_judge.check_identity( recorded, row[ "identity" ] )
+    check_labels( labels )
     judged   = { row[ "pair_id" ]: row for row in verdicts }
     labelled = { row[ "pair_id" ]: row for row in labels }
     rows, unresolved = [], 0
@@ -246,7 +266,8 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
             unresolved += 1
             continue
         call = judged[ pair_id ][ "material" ]
-        rows.append( dict( pair, human=human, judge=call, readers=labelled[ pair_id ].get( "readers", {} ) ) )
+        named = { name: value for name, value in labelled[ pair_id ].get( "readers", {} ).items() if value is not None }
+        rows.append( dict( pair, human=human, judge=call, readers=named ) )
 
     strata = {}
     for row in rows: row[ "truth_stratum" ] = f"{row[ 'response_type' ]}/{'error' if row[ 'human' ] else 'correct'}"

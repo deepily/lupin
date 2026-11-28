@@ -147,6 +147,25 @@ def test_no_scored_stratum_never_passes():
     assert report[ "judge_against_human" ][ "reason" ] == "no items"
 
 
+@pytest.mark.parametrize( "field, value", [ ( "material_error", "no" ), ( "material_error", "can't tell" ), ( "material_error", 0 ), ( "readers", { "one": "no" } ) ] )
+def test_a_label_that_is_not_a_boolean_is_refused( field, value ):
+    parts = planted()
+    parts[ 2 ][ 3 ][ field ] = value
+    with pytest.raises( ValueError, match="pair p3: a label must be true, false or null" ):
+        report_of( parts )
+
+
+def test_a_reader_who_could_not_tell_is_left_out_of_that_pair():
+    parts = planted()
+    parts[ 2 ][ 3 ][ "readers" ] = { "one": None, "two": True }
+    assert report_of( parts )[ "human_against_human" ][ "one / two" ][ "n" ] == 59
+
+
+def test_a_missed_line_validates_no_card_type():
+    report = report_of( planted( caught=26, missed=4 ) )
+    assert report[ "unscored_strata" ] == [] and report[ "card_types" ] == { "yes_no": "judge not validated" }
+
+
 def test_agreement_says_why_kappa_is_undefined():
     assert scoring.agreement( [ True, True ], [ True, True ] ) == { "n": 2, "kappa": None, "positive": 1.0, "negative": None, "reason": "both used one category" }
 
