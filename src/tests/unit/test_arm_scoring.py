@@ -30,7 +30,8 @@ def _record( index, correct ):
         - returns a record with the fields the scorer re-indexes and the report reads
     """
     return { "arm": ENGINE_ARM, "row_index": index, "meta": { "notification_id": f"n{index}", "correct": correct, "response_type": "yes_no" if index % 2 else "multiple_choice",
-                                                                        "forecast": { "value": index }, "confidence": index / 10 } }
+                                                                        "forecast": { "value": index }, "confidence": index / 10,
+                                                                        "scorable": index % 3 != 0, "write_in": index % 4 == 0 } }
 
 
 def _run( count ):
@@ -99,13 +100,13 @@ def test_final_window_floors_the_tune_size_so_eleven_asks_leave_four():
     assert [ r[ "meta" ][ "notification_id" ] for r in cut[ "records" ][ ENGINE_ARM ] ] == [ "n7", "n8", "n9", "n10" ]
 
 
-def test_compact_keeps_the_six_fields_per_ask_and_the_counts():
-    """Each ask keeps six fields, and the always-yes flag comes from the baseline arm."""
+def test_compact_keeps_the_eight_fields_per_ask_and_the_counts():
+    """Each ask keeps eight fields, and the always-yes flag comes from the baseline arm."""
     compacted = scoring.compact( scoring.final_window( _run( 10 ) ) )
     assert compacted[ "asks" ][ 0 ] == { "id": "n7", "response_type": "yes_no", "forecast": { "value": 7 }, "confidence": 0.7,
-                                         "correct": False, "always_yes_correct": False }
+                                         "correct": False, "always_yes_correct": False, "scorable": True, "write_in": False }
     assert compacted[ "asks" ][ 1 ] == { "id": "n8", "response_type": "multiple_choice", "forecast": { "value": 8 }, "confidence": 0.8,
-                                         "correct": True, "always_yes_correct": True }
+                                         "correct": True, "always_yes_correct": True, "scorable": True, "write_in": True }
     assert compacted[ "asks" ][ 2 ][ "always_yes_correct" ] is True
     assert ( compacted[ "not_replayable" ], compacted[ "unrebuildable_cases" ], compacted[ "families" ] ) == ( 2, 3, 4 )
 
@@ -128,6 +129,21 @@ def test_expand_gives_back_the_figures_compact_kept():
     assert [ r[ "row_index" ] for r in back[ "records" ][ ENGINE_ARM ] ] == [ 0, 1, 2 ]
     assert back[ "records" ][ ENGINE_ARM ][ 1 ][ "meta" ][ "forecast" ] == { "value": 8 } and back[ "records" ][ ENGINE_ARM ][ 1 ][ "meta" ][ "confidence" ] == 0.8
     assert ( back[ "not_replayable" ], back[ "unrebuildable_cases" ], back[ "families" ] ) == ( 2, 3, 4 )
+
+
+def test_expand_carries_scorable_and_write_in_to_the_engine_record():
+    """Nine asks of ten are cut to n7, n8, n9; n9 is the unscorable one and n8 the write-in."""
+    back = scoring.expand( scoring.compact( scoring.final_window( _run( 10 ) ) ) )
+    assert [ ( r[ "meta" ][ "scorable" ], r[ "meta" ][ "write_in" ] ) for r in back[ "records" ][ ENGINE_ARM ] ] == [ ( True, False ), ( True, True ), ( False, False ) ]
+
+
+def test_expand_leaves_the_two_flags_out_of_a_compact_run_written_without_them():
+    """A file written before the flags existed gains neither of them."""
+    compacted = scoring.compact( scoring.final_window( _run( 10 ) ) )
+    for ask in compacted[ "asks" ]: del ask[ "scorable" ], ask[ "write_in" ]
+    metas = [ r[ "meta" ] for r in scoring.expand( compacted )[ "records" ][ ENGINE_ARM ] ]
+    assert len( metas ) == 3
+    assert not any( "scorable" in meta or "write_in" in meta for meta in metas )
 
 
 def test_score_arm_runs_the_replay_under_the_frozen_settings_and_puts_them_back( monkeypatch ):

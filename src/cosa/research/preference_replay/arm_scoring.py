@@ -68,11 +68,13 @@ def compact( run: Dict[str, Any] ) -> Dict[str, Any]:
 
     Ensures:
         - returns { asks, not_replayable, unrebuildable_cases, families }, asks holding per ask the id, answer type,
-          forecast, confidence, correct and always_yes_correct, in run order
+          forecast, confidence, correct, always_yes_correct, scorable and write_in, in run order
+        - scorable and write_in are replay's own flags for the ask, taken from the engine record
     """
     return { "asks": [ { "id": engine[ "meta" ][ "notification_id" ], "response_type": engine[ "meta" ][ "response_type" ],
                          "forecast": engine[ "meta" ][ "forecast" ], "confidence": engine[ "meta" ][ "confidence" ],
-                         "correct": engine[ "meta" ][ "correct" ], "always_yes_correct": baseline[ "meta" ][ "correct" ] }
+                         "correct": engine[ "meta" ][ "correct" ], "always_yes_correct": baseline[ "meta" ][ "correct" ],
+                         "scorable": engine[ "meta" ][ "scorable" ], "write_in": engine[ "meta" ][ "write_in" ] }
                        for engine, baseline in zip( run[ "records" ][ ENGINE_ARM ], run[ "records" ][ BASELINE_NAME ] ) ],
              "not_replayable": run[ "not_replayable" ], "unrebuildable_cases": run[ "unrebuildable_cases" ], "families": run[ "families" ] }
 
@@ -86,10 +88,13 @@ def expand( compacted: Dict[str, Any] ) -> Dict[str, Any]:
 
     Ensures:
         - returns a run whose engine and always-yes records carry notification_id, response_type and correct, and the engine's also forecast and confidence
+        - the engine's records carry scorable and write_in when the compact ask does; a run compacted before those flags were kept gets neither
         - expand( compact( run ) ) holds the same per-ask figures as run
     """
     engine   = [ { "arm": ENGINE_ARM, "row_index": i, "meta": { "notification_id": a[ "id" ], "response_type": a[ "response_type" ], "forecast": a[ "forecast" ],
-                                                                "confidence": a[ "confidence" ], "correct": a[ "correct" ] } } for i, a in enumerate( compacted[ "asks" ] ) ]
+                                                                "confidence": a[ "confidence" ], "correct": a[ "correct" ],
+                                                                **{ key: a[ key ] for key in ( "scorable", "write_in" ) if key in a } } }
+                for i, a in enumerate( compacted[ "asks" ] ) ]
     baseline = [ { "arm": BASELINE_NAME, "row_index": i, "meta": { "notification_id": a[ "id" ], "response_type": a[ "response_type" ], "correct": a[ "always_yes_correct" ] } }
                  for i, a in enumerate( compacted[ "asks" ] ) ]
     return { "records": { ENGINE_ARM: engine, BASELINE_NAME: baseline }, "not_replayable": compacted[ "not_replayable" ],

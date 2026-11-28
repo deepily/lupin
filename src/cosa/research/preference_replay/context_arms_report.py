@@ -15,10 +15,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import cosa.utils.util as cu
+from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE
 from cosa.repo.doc_lint.pool_builder import resolve_commit
 from cosa.research.preference_replay.arm_scoring import expand
 from cosa.research.preference_replay.context_arms import ARMS
-from cosa.research.preference_replay.replay_loop import ENGINE_ARM, summarize
+from cosa.research.preference_replay.replay_loop import ENGINE_ARM, multiple_choice_split, summarize
 
 BASELINE_ARM = "always_yes"
 PAIRED_ARM   = "q_arm"
@@ -59,15 +60,23 @@ def _per_100_by_type( run: Dict[str, Any] ) -> Dict[str, Dict[str, Any]]:
         - run is the dict replay returns
 
     Ensures:
-        - returns response type to { asks, correct, per_100 }, with types in sorted order
+        - returns response type to { asks, correct, per_100, scorable, right_scorable, per_100_scorable }, with types in sorted order
         - per_100 is 100 times correct over asks
+        - scorable counts the asks flagged scorable, right_scorable the correct ones among them, and per_100_scorable is 100 times
+          the second over the first, or None when no ask is scorable, by multiple_choice_split
+        - all three are None when any ask of the type carries no scorable flag, as in a file written before the flags were kept
     """
-    tally = {}
-    for record in _engine_records( run ):
-        cell = tally.setdefault( record[ "meta" ][ "response_type" ], { "asks": 0, "correct": 0 } )
-        cell[ "asks" ]   += 1
-        cell[ "correct" ] += 1 if record[ "meta" ][ "correct" ] else 0
-    return { kind: dict( cell, per_100=100.0 * cell[ "correct" ] / cell[ "asks" ] ) for kind, cell in sorted( tally.items() ) }
+    by_kind = {}
+    for record in _engine_records( run ): by_kind.setdefault( record[ "meta" ][ "response_type" ], [] ).append( record[ "meta" ] )
+    cells = {}
+    for kind, metas in sorted( by_kind.items() ):
+        correct = sum( 1 for meta in metas if meta[ "correct" ] )
+        split   = multiple_choice_split( metas ) if all( "scorable" in meta for meta in metas ) else None
+        rate    = None if split is None else split[ "accuracy_scorable" ]
+        cells[ kind ] = { "asks": len( metas ), "correct": correct, "per_100": 100.0 * correct / len( metas ),
+                          "scorable": None if split is None else split[ "scorable" ], "right_scorable": None if split is None else split[ "right" ],
+                          "per_100_scorable": None if rate is None else 100.0 * rate }
+    return cells
 
 
 def _paired_with_q( run: Dict[str, Any], q_run: Dict[str, Any] ) -> Dict[str, Any]:
@@ -172,6 +181,8 @@ def render_arm_report( rows: List[Dict[str, Any]], coverage: Dict[str, Dict[str,
     Ensures:
         - returns text with the provenance, the coverage table, the reconciliations, and one results row per arm
         - the results table gives correct per 100 for each answer type, then the pairs against Q and against always-yes on yes/no asks
+        - a multiple-choice cell adds the rate over scorable asks and their count, "none (0)" with no scorable ask, and
+          "not recorded" when the asks carry no scorable flag
         - a second table gives the pair against Q for each answer type
         - the same inputs give the same text
     """
@@ -188,7 +199,17 @@ def render_arm_report( rows: List[Dict[str, Any]], coverage: Dict[str, Dict[str,
                " | vs Q: arm only | vs Q: Q only | vs Q: p | vs Q: verdict | vs always-yes (yes/no only): arm only | yes only | p | verdict |",
                "|---|" + "---|" * ( len( kinds ) + 8 ) ]
     for row in rows:
-        cells = " | ".join( f"{row[ 'by_type' ][ kind ][ 'per_100' ]:.1f} ({row[ 'by_type' ][ kind ][ 'asks' ]})" if kind in row[ "by_type" ] else "-" for kind in kinds )
+        cells = []
+        for kind in kinds:
+            cell = row[ "by_type" ].get( kind )
+            text = "-" if cell is None else f"{cell[ 'per_100' ]:.1f} ({cell[ 'asks' ]})"
+            if cell is not None and kind == RESPONSE_TYPE_MULTIPLE_CHOICE:
+                if cell[ "scorable" ] is None: text += "; scorable not recorded"
+                else:
+                    rate  = "none" if cell[ "per_100_scorable" ] is None else f"{cell[ 'per_100_scorable' ]:.1f}"
+                    text += f"; scorable {rate} ({cell[ 'scorable' ]})"
+            cells.append( text )
+        cells = " | ".join( cells )
         lines.append( f"| {row[ 'arm' ]} | {cells} | {_pair_cells( row[ 'vs_q' ] )} | {_pair_cells( row[ 'vs_always_yes' ] )} |" )
     lines += [ "", "## Against Q by answer type", "", "| arm | answer type | arm only | Q only | p | verdict |", "|---|---|---|---|---|---|" ]
     for row in rows:

@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+import cosa.utils.util as cu
+from cosa.research.preference_replay.arm_scoring import expand
 from cosa.research.preference_replay.context_arms_report import compare_arms, main, read_coverage, render_arm_report
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM
 
@@ -71,8 +73,58 @@ def test_rows_follow_arm_order_and_count_each_type():
     assert [ r[ "arm" ] for r in rows ] == [ "Q", "Q+A", "Q+O" ]
     q_row = rows[ 0 ]
     assert q_row[ "asks" ] == 12
-    assert q_row[ "by_type" ] == { "multiple_choice": { "asks": 4, "correct": 2, "per_100": 50.0 }, "yes_no": { "asks": 8, "correct": 0, "per_100": 0.0 } }
-    assert rows[ 1 ][ "by_type" ][ "yes_no" ] == { "asks": 8, "correct": 8, "per_100": 100.0 }
+    unknown = { "scorable": None, "right_scorable": None, "per_100_scorable": None }
+    assert q_row[ "by_type" ] == { "multiple_choice": { "asks": 4, "correct": 2, "per_100": 50.0, **unknown }, "yes_no": { "asks": 8, "correct": 0, "per_100": 0.0, **unknown } }
+    assert rows[ 1 ][ "by_type" ][ "yes_no" ] == { "asks": 8, "correct": 8, "per_100": 100.0, **unknown }
+
+
+def _flagged( run, scorable ):
+    """
+    Give a run's multiple-choice records the scorable and write_in flags.
+
+    Requires:
+        - run is what _run returns; scorable holds one bool per multiple-choice ask, in order
+
+    Ensures:
+        - returns a copy; an unscorable ask is marked a write-in; the input is not changed
+    """
+    copied = copy.deepcopy( run )
+    for record, flag in zip( [ r for r in copied[ "records" ][ ENGINE_ARM ] if r[ "meta" ][ "response_type" ] == "multiple_choice" ], scorable ):
+        record[ "meta" ].update( scorable=flag, write_in=not flag )
+    return copied
+
+
+def test_multiple_choice_gives_the_scorable_count_and_the_rate_over_scorable_beside_the_old_figure():
+    """Q is right on the first two of four; the rate counts the scorable asks only."""
+    row  = compare_arms( { "Q": _flagged( _run( Q_FLAGS ), [ True, False, True, False ] ) }, FLOOR )[ 0 ]
+    cell = row[ "by_type" ][ "multiple_choice" ]
+    assert cell == { "asks": 4, "correct": 2, "per_100": 50.0, "scorable": 2, "right_scorable": 1, "per_100_scorable": 50.0 }
+    cell = compare_arms( { "Q": _flagged( _run( Q_FLAGS ), [ True, True, False, True ] ) }, FLOOR )[ 0 ][ "by_type" ][ "multiple_choice" ]
+    assert ( cell[ "per_100" ], cell[ "scorable" ], cell[ "right_scorable" ] ) == ( 50.0, 3, 2 )
+    assert cell[ "per_100_scorable" ] == pytest.approx( 200 / 3 )
+    text = render_arm_report( compare_arms( { "Q": _flagged( _run( Q_FLAGS ), [ True, True, False, True ] ) }, FLOOR ), COVERAGE, [], {} )
+    assert "| Q | 50.0 (4); scorable 66.7 (3) | 0.0 (8) |" in text
+
+
+def test_a_type_with_no_scorable_ask_says_none_rather_than_a_rate():
+    rows = compare_arms( { "Q": _flagged( _run( Q_FLAGS ), [ False ] * 4 ) }, FLOOR )
+    assert ( rows[ 0 ][ "by_type" ][ "multiple_choice" ][ "scorable" ], rows[ 0 ][ "by_type" ][ "multiple_choice" ][ "per_100_scorable" ] ) == ( 0, None )
+    assert "| Q | 50.0 (4); scorable none (0) |" in render_arm_report( rows, COVERAGE, [], {} )
+
+
+def test_one_unflagged_ask_makes_the_whole_type_not_recorded():
+    run = _flagged( _run( Q_FLAGS ), [ True, True, True ] )
+    assert compare_arms( { "Q": run }, FLOOR )[ 0 ][ "by_type" ][ "multiple_choice" ][ "scorable" ] is None
+
+
+def test_a_committed_compact_file_written_before_the_flags_reads_not_recorded():
+    """The real producer's file, read by the real reader."""
+    with open( f"{cu.get_project_root()}/src/conf/prediction-context-arm-q-per-ask.json", encoding="utf-8" ) as handle: document = json.load( handle )
+    assert not any( "scorable" in ask for ask in document[ "run" ][ "asks" ] )
+    rows = compare_arms( { "Q": expand( document[ "run" ] ) }, FLOOR )
+    assert rows[ 0 ][ "by_type" ][ "multiple_choice" ][ "asks" ] > 0
+    assert rows[ 0 ][ "by_type" ][ "multiple_choice" ][ "scorable" ] is None
+    assert "scorable not recorded" in render_arm_report( rows, { "Q": COVERAGE[ "Q" ] }, [], {} )
 
 
 def test_q_has_no_pair_against_itself():
@@ -175,8 +227,8 @@ def test_report_holds_provenance_coverage_reconciliations_and_one_row_per_arm():
     assert "- **The 7 that differ**: the export lacks their earlier rows" in text
     assert "- **The 45 missing**: 5 newer than the export, 40 unexplained" in text
     assert "| multiple_choice correct per 100 (asks) | yes_no correct per 100 (asks) |" in text
-    assert "| Q | 50.0 (4) | 0.0 (8) | - | - | - | - |" in text
-    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better | 5 | 0 | 0.0625 | not decisive |" in text
+    assert "| Q | 50.0 (4); scorable not recorded | 0.0 (8) | - | - | - | - |" in text
+    assert "| Q+A | 50.0 (4); scorable not recorded | 100.0 (8) | 8 | 0 | 0.0078 | engine better | 5 | 0 | 0.0625 | not decisive |" in text
     assert "| Q+A | yes_no | 8 | 0 | 0.0078 | engine better |" in text
     assert "| Q+A | multiple_choice | 0 | 0 | 1.0000 | not decisive |" in text
     assert "| arm | answer type | arm only | Q only | p | verdict |" in text
@@ -198,9 +250,9 @@ def test_report_marks_a_type_an_arm_did_not_replay():
                  for arm, run in runs.items() }
     rows = compare_arms( only_yes, FLOOR )
     rows[ 1 ][ "by_type" ].pop( "yes_no" )
-    rows[ 1 ][ "by_type" ][ "multiple_choice" ] = { "asks": 1, "correct": 1, "per_100": 100.0 }
+    rows[ 1 ][ "by_type" ][ "multiple_choice" ] = { "asks": 1, "correct": 1, "per_100": 100.0, "scorable": 1, "right_scorable": 1, "per_100_scorable": 100.0 }
     text = render_arm_report( rows, COVERAGE, RECONCILIATIONS, PROVENANCE )
-    assert "| Q+A | 100.0 (1) | - |" in text
+    assert "| Q+A | 100.0 (1); scorable 100.0 (1) | - |" in text
 
 
 def test_report_carries_the_by_type_heading_as_its_own_line():
@@ -276,8 +328,8 @@ def _main_text( tmp_path, floor=6, floor_source="the exact test cannot reach 0.0
 def test_main_writes_one_row_per_arm_from_the_per_ask_files( tmp_path ):
     _write_inputs( tmp_path )
     text = _main_text( tmp_path )
-    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better |" in text
-    for arm in ( "Q+P", "Q+H" ): assert f"| {arm} | 50.0 (4) | 25.0 (8) |" in text
+    assert "| Q+A | 50.0 (4); scorable not recorded | 100.0 (8) | 8 | 0 | 0.0078 | engine better |" in text
+    for arm in ( "Q+P", "Q+H" ): assert f"| {arm} | 50.0 (4); scorable not recorded | 25.0 (8) |" in text
 
 
 def test_main_names_the_floor_its_source_the_files_code_and_the_command( tmp_path ):
@@ -324,8 +376,8 @@ def test_main_writes_the_notes_file_as_reconciliations_skipping_blank_lines( tmp
 def test_main_passes_the_floor_it_was_given_to_the_comparison( tmp_path ):
     """Eight pairs clear a floor of 6 and miss a floor of 10."""
     _write_inputs( tmp_path )
-    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better |" in _main_text( tmp_path, floor=6 )
-    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | not decisive |" in _main_text( tmp_path, floor=10 )
+    assert "| Q+A | 50.0 (4); scorable not recorded | 100.0 (8) | 8 | 0 | 0.0078 | engine better |" in _main_text( tmp_path, floor=6 )
+    assert "| Q+A | 50.0 (4); scorable not recorded | 100.0 (8) | 8 | 0 | 0.0078 | not decisive |" in _main_text( tmp_path, floor=10 )
     assert "- discordant floor: 10 pairs; source: " in ( tmp_path / "r.md" ).read_text()
 
 
