@@ -226,3 +226,24 @@ def test_a_batch_answer_that_is_not_an_answers_map_is_unreadable():
 def test_a_cancelled_batch_is_no_answer_per_question():
     draft = rules.draft_of( card( "open_ended_batch", "[cancelled]", BATCH ) )
     assert { f[ "relation" ] for f in draft[ "fields" ].values() } == { "no_answer" } and draft[ "unknowns" ] == [ "cancellation" ]
+
+
+def test_the_draft_options_carry_ids_prefixed_by_the_header():
+    field = rules.draft_of( card( "multiple_choice", picks( { "DB": "typed" } ), OPTIONS ) )[ "fields" ][ "DB" ]
+    assert [ o[ "id" ] for o in field[ "options" ] ] == [ "DB#o1", "DB#o2", "DB#o3" ]
+
+
+def test_cancelled_false_is_not_a_cancellation():
+    draft = rules.draft_of( card( "open_ended", '{"cancelled": false}' ) )
+    assert draft[ "unknowns" ] == [] and draft[ "fields" ][ "answer" ][ "relation" ] is None
+
+
+def test_an_option_label_with_stray_spaces_still_matches_its_pick():
+    options = { "questions": [ { "header": "DB", "options": [ { "label": " SQLite " } ] } ] }
+    field   = rules.draft_of( card( "multiple_choice", picks( { "DB": "SQLite" } ), options ) )[ "fields" ][ "DB" ]
+    assert field[ "selected_ids" ] == [ "DB#o1" ] and field[ "write_in_text" ] is None
+
+
+def test_a_multi_select_of_typed_items_only_is_a_write_in():
+    field = rules.draft_of( card( "multiple_choice", picks( { "DB": [ "files", "memory" ] } ), OPTIONS ) )[ "fields" ][ "DB" ]
+    assert ( field[ "kind" ], field[ "selected_ids" ], field[ "write_in_text" ] ) == ( "write_in_text", [], "files; memory" )
