@@ -139,10 +139,10 @@ def _read_field( field, reply ):
         - field is a draft field; reply is one entry of the model's "fields" list
 
     Ensures:
-        - returns None when the relation is not one the field allows
+        - returns None when the relation is not one the field allows, or a condition's option id is neither text nor null
         - else returns relation, stance, acts, conditions, spans, uncertainty and unsure
         - a span or a condition's text is kept only when it is copied from the answer
-        - a condition's option id is kept only when the card has that option, else None
+        - a condition's text option id is kept only when the card has that option, else None
         - acts are kept only for open-ended and batch fields, and only from ACT_KINDS
         - stance is kept only for a yes or no field that had none
         - a "neither" with a comment is re_frame unless a kept span is quoted from the comment
@@ -155,6 +155,8 @@ def _read_field( field, reply ):
     listed  = lambda name: reply[ name ] if isinstance( reply.get( name ), list ) else []
     spans   = [ span for span in listed( "spans" ) if quoted( span ) ]
     ids     = { option[ "id" ] for option in field[ "options" ] }
+    named   = [ entry.get( "modifies_option_id" ) for entry in listed( "conditions" ) if isinstance( entry, dict ) ]
+    if any( value is not None and not isinstance( value, str ) for value in named ): return None
     conditions = [ { "text": entry[ "text" ], "modifies_option_id": entry.get( "modifies_option_id" ) if entry.get( "modifies_option_id" ) in ids else None }
                    for entry in listed( "conditions" ) if isinstance( entry, dict ) and quoted( entry.get( "text" ) ) ]
     acts    = [ act for act in listed( "acts" ) if act in ACT_KINDS ] if field[ "kind" ] in TEXT_KINDS else []

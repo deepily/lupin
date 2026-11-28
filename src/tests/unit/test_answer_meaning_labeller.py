@@ -6,11 +6,13 @@ No test here calls a model: complete_sync is replaced, or the SDK query is a sta
 
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import AssistantMessage, TextBlock
 
 from cosa.agents.answer_meaning import labeller as lb
+from cosa.agents.answer_meaning import rules
 from cosa.repo.doc_lint import model_transport as mt
 from cosa.rest.db.repositories.answer_meaning_repository import RELATIONS_V2
 
@@ -271,3 +273,34 @@ def test_the_captured_stance_less_reply_infers_yes( model ):
     model.reply = load( "replies" )[ "replies" ][ "stance_less" ][ "reply" ]
     entry_      = lb.label( load( "cards" )[ "stance_less" ] )[ "native_answer" ][ "answer" ]
     assert entry_[ "stance" ] == "yes" and entry_[ "stance_source" ] == "inferred"
+
+
+@pytest.mark.parametrize( "bad", [ [ "o2" ], { "id": "o2" }, 2 ], ids=[ "list", "object", "number" ] )
+def test_a_condition_whose_option_id_is_not_text_makes_the_field_unreadable( model, bad ):
+    picked      = field( kind="write_in_text", answer="Page, weekly", stance=None, comment=None, options=OPTIONS )
+    model.reply = [ entry( "D", "expands_other_option", conditions=[ { "text": "weekly", "modifies_option_id": bad } ] ) ]
+    result      = lb.label( draft( D=picked ) )
+    assert result[ "native_answer" ] == { "D": { "kind": "write_in_text" } }
+    assert result[ "conditions" ] == [] and result[ "unknowns" ] == [ "unreadable_payload" ]
+
+
+def test_the_prompt_sends_the_stance_and_the_comment_in_their_own_keys():
+    prompt = lb.build_user_prompt( draft(), [ "answer" ] )
+    assert '"stance": "yes"' in prompt and '"comment": "only on Monday"' in prompt
+
+
+@pytest.mark.parametrize( "unsure", [ "false", "true", 1 ] )
+def test_only_the_boolean_true_counts_as_unsure( model, unsure ):
+    model.reply = [ entry( unsure=unsure ) ]
+    assert lb.label( draft() )[ "unknowns" ] == []
+
+
+def test_a_draft_from_the_rules_layer_keeps_its_prefixed_option_id( model ):
+    options = { "questions": [ { "header": "DB", "question": "Which store?", "options": [ { "label": "Postgres (Recommended)" }, { "label": "Files" } ] } ] }
+    card    = SimpleNamespace( response_type="multiple_choice", response_value={ "value": '{"answers": {"DB": "Files, for now"}}', "source": "ui" },
+                               response_options=options, response_default=None, title="Store", message="Pick a store", abstract=None )
+    model.reply = [ entry( "DB", "expands_other_option", conditions=[ { "text": "for now", "modifies_option_id": "DB#o2" } ] ) ]
+    result      = lb.label( rules.draft_of( card ) )
+    assert result[ "native_answer" ] == { "DB": { "kind": "write_in_text", "relation": "expands_other_option" } }
+    assert result[ "conditions" ] == [ { "text": "for now", "modifies_option_id": "DB#o2", "field_key": "DB" } ]
+    assert '"DB#o1"' in model.calls[ 0 ][ 2 ]
