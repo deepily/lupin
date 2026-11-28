@@ -79,7 +79,7 @@ def _model( seen, reply=GOOD ):
 def _run( world, query, *extra ):
     """Run main on the world's files and return the printed lines and the rows written."""
     printed = []
-    argv    = [ "--per-ask", str( world[ "per_ask" ] ), "--archive", str( world[ "archive" ] ), "--work-dir", str( world[ "work" ] ), *extra ]
+    argv    = [ "--per-ask", str( world[ "per_ask" ] ), "--archive", str( world[ "archive" ] ), "--work-dir", str( world[ "work" ] ), "--model", "stand-in-one", *extra ]
     assert typed.main( argv, query_fn=query, out=printed.append ) == 0
     return printed, [ json.loads( line ) for line in ( world[ "work" ] / typed.OUT_NAME ).read_text().splitlines() ]
 
@@ -89,10 +89,10 @@ def test_each_typed_field_gets_a_prediction_beside_the_words_actually_typed( wor
     printed, rows = _run( world, _model( seen ) )
     first, third = str( world[ "cards" ][ 0 ][ "id" ] ), str( world[ "cards" ][ 2 ][ "id" ] )
     assert [ ( r[ "id" ], r[ "field" ], r[ "actual" ] ) for r in rows ] == [ ( first, "Plan", PLAN_WORDS ), ( first, "Extras", EXTRA_WORDS ), ( third, "Extras", EXTRA_WORDS ) ]
-    assert all( ( r[ "kind" ], r[ "predicted" ], r[ "reason" ], r[ "raw" ], r[ "model" ] ) == ( "question", "What does it cost?", None, None, "claude-sonnet-5-5" ) for r in rows )
+    assert all( ( r[ "kind" ], r[ "predicted" ], r[ "reason" ], r[ "raw" ], r[ "model" ] ) == ( "question", "What does it cost?", None, None, "stand-in-one" ) for r in rows )
     assert len( { r[ "prompt_version" ] for r in rows } ) == 1
-    assert printed == [ "model claude-sonnet-5-5: 3 typed fields on 2 cards, 3 predicted, 0 without a prediction" ]
-    assert [ model for _, model in seen ] == [ "claude-sonnet-5-5" ] * 3
+    assert printed == [ "model stand-in-one: 3 typed fields on 2 cards, 3 predicted, 0 without a prediction" ]
+    assert [ model for _, model in seen ] == [ "stand-in-one" ] * 3
 
 
 def test_no_prompt_holds_anything_that_was_typed_and_each_names_its_field( world ):
@@ -105,11 +105,11 @@ def test_no_prompt_holds_anything_that_was_typed_and_each_names_its_field( world
     assert sum( 'for the field "Plan"' in p for p in prompts ) == 1 and sum( 'for the field "Extras"' in p for p in prompts ) == 2
 
 
-def test_the_limit_and_the_model_flag_cut_the_run_and_name_the_model( world ):
+def test_the_limit_and_a_later_model_flag_cut_the_run_and_name_the_model( world ):
     seen = []
-    _, rows = _run( world, _model( seen ), "--limit", "1", "--model", "claude-haiku-5-5" )
+    _, rows = _run( world, _model( seen ), "--limit", "1", "--model", "stand-in-two" )
     assert [ r[ "field" ] for r in rows ] == [ "Plan" ]
-    assert [ model for _, model in seen ] == [ "claude-haiku-5-5" ] and rows[ 0 ][ "model" ] == "claude-haiku-5-5"
+    assert [ model for _, model in seen ] == [ "stand-in-two" ] and rows[ 0 ][ "model" ] == "stand-in-two"
 
 
 @pytest.mark.parametrize( "reply", [ "I cannot say.", json.dumps( { "kind": "praise", "reply": "x" } ), json.dumps( { "kind": "defer", "reply": "  " } ), json.dumps( { "kind": "defer" } ) ] )

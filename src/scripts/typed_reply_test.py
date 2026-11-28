@@ -11,7 +11,7 @@ Run from a seat tree, pinning all three:
 
     cd <tree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python src/scripts/typed_reply_test.py \
         --per-ask <write-in run>/full-answer-arm-per-ask.jsonl --archive <write-in run>/archive-copy.sqlite \
-        --work-dir <new folder> [--limit N]
+        --work-dir <new folder> --model <model id> [--limit N]
 """
 
 import argparse
@@ -36,7 +36,6 @@ from cosa.research.preference_replay.archive_replay import locked_sessions, read
 from cosa.research.preference_replay.replay_loop import _actual_dict
 from cosa.rest.postgres_models import Notification
 
-MODEL       = "claude-sonnet-5-5"
 WORKERS     = 2
 OUT_NAME    = "typed-reply-predictions.jsonl"
 LEDGER_NAME = "ledger.jsonl"
@@ -164,6 +163,7 @@ def main( argv=None, query_fn=None, out=print ):
         - argv is a list of arguments or None; query_fn is None for the live bounded Claude Code call, or a double for a test
 
     Ensures:
+        - --model names the model to call; the code holds no model id
         - the archive is opened read-only; every file is written in the work folder
         - --limit N cuts the typed fields to the first N, for a probe in its own work folder
         - writes OUT_NAME, one line per field with predict_all's row plus the model and the prompt version, and prints the counts; returns 0
@@ -174,7 +174,7 @@ def main( argv=None, query_fn=None, out=print ):
     """
     parser = argparse.ArgumentParser( description="Predict the replies typed into multiple-choice fields" )
     for name in ( "--per-ask", "--archive", "--work-dir" ): parser.add_argument( name, required=True )
-    parser.add_argument( "--model", default=MODEL )
+    parser.add_argument( "--model", required=True )
     parser.add_argument( "--limit", type=int, default=None )
     parser.add_argument( "--workers", type=int, default=WORKERS )
     args   = parser.parse_args( argv )
