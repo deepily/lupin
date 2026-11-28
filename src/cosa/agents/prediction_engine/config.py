@@ -47,6 +47,30 @@ DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED = False
 # the one three-way vote, instead of abstaining. False keeps today's vote and its abstention.
 DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED = False
 
+# Whether a burst of retry copies among the retrieved cases counts once (phase 11b, candidate recall).
+DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED = False
+
+# Whether one question template may take at most DEFAULT_CANDIDATE_TEMPLATE_CAP of the neighbour places.
+DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED = False
+DEFAULT_CANDIDATE_TEMPLATE_CAP         = 3
+
+# With either candidate switch on, how many times the neighbour limit is fetched, so that thinned places refill.
+CANDIDATE_OVERFETCH_FACTOR             = 5
+
+# Whether the case's category ranks the neighbours instead of filtering them, behind `prediction engine
+# category as ranking`. The boost is added to a same-category case's similarity, as a fraction, for ordering only.
+DEFAULT_CATEGORY_AS_RANKING            = False
+DEFAULT_CATEGORY_RANK_BOOST            = 0.05
+
+# Whether cases sharing words with the ask (BM25 over the stored question) are candidates beside the cosine
+# neighbours. "fused" merges the two rankings, "lexical" uses the word ranking alone, to compare the two.
+DEFAULT_LEXICAL_CANDIDATES_ENABLED     = False
+DEFAULT_LEXICAL_CANDIDATES_MODE        = "fused"
+VALID_LEXICAL_CANDIDATES_MODES         = ( "fused", "lexical" )
+
+# The most stored cases the word ranking reads for one ask, above any one account's case count.
+LEXICAL_POOL_LIMIT                     = 100000
+
 # Whether a forecast is scored by the complete-action measure (the whole action, not only its stance). False
 # keeps the stance-only comparators exactly as they were.
 DEFAULT_COMPLETE_ACTION_SCORING_ENABLED = False
