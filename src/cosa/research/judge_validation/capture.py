@@ -19,7 +19,7 @@ import os
 import re
 
 import cosa.utils.util as cu
-from cosa.agents.prediction_engine.answer_judge import DEFAULT_MODEL, make_judge
+from cosa.agents.prediction_engine.answer_judge import judge_model, make_judge
 from cosa.repo.doc_lint import model_transport
 
 PAIRS_PATH  = "/src/cosa/research/judge_validation/minimal_pairs.json"
@@ -133,7 +133,7 @@ def main( argv=None, complete=model_transport.complete_sync ):
     Capture one fixture per kind and write each to its own file.
 
     Requires:
-        - argv may hold --model, defaulting to the judge's model, --out and one or more --kind
+        - argv may hold --model, defaulting to the configured judge model, --out and one or more --kind
 
     Ensures:
         - writes <out>/<kind>.json for each chosen kind, out defaulting to the committed fixture folder
@@ -144,16 +144,17 @@ def main( argv=None, complete=model_transport.complete_sync ):
         - SystemExit for bad arguments, KeyError for an unknown --kind
     """
     parser = argparse.ArgumentParser( description="Capture real judge replies into fixtures." )
-    parser.add_argument( "--model", default=DEFAULT_MODEL, help="model id the judge calls" )
+    parser.add_argument( "--model", default=None, help="model id the judge calls" )
     parser.add_argument( "--out", default=None, help="folder to write into" )
     parser.add_argument( "--kind", action="append", help="capture only this kind; repeatable" )
     args  = parser.parse_args( argv )
+    model = args.model or judge_model()
     out   = args.out or cu.get_project_root() + FIXTURE_DIR
     cases = load_cases()
     os.makedirs( out, exist_ok=True )
     missed = 0
     for kind in args.kind or list( cases ):
-        fixture = capture_case( cases[ kind ], args.model, complete=complete )
+        fixture = capture_case( cases[ kind ], model, complete=complete )
         with open( os.path.join( out, kind + ".json" ), "w", encoding="utf-8" ) as handle:
             handle.write( json.dumps( fixture, indent=2, ensure_ascii=False ) + "\n" )
         for side, record in fixture[ "sides" ].items():

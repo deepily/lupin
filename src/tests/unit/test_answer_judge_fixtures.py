@@ -8,7 +8,7 @@ import pytest
 
 import cosa.utils.util as cu
 from cosa.agents.prediction_engine.accuracy_comparators import _ask_judge
-from cosa.agents.prediction_engine.answer_judge import DEFAULT_MODEL, make_judge
+from cosa.agents.prediction_engine.answer_judge import judge_model, make_judge
 from cosa.research.judge_validation import capture
 
 KINDS = ( "before_after", "staging_production", "must_may", "negated_permission", "scope_change", "time_change", "easy", "invented_condition" )
@@ -63,7 +63,7 @@ def test_each_fixture_holds_the_case_the_pairs_file_names_for_its_kind():
     assert set( cases ) == set( KINDS )
     for kind, case in cases.items():
         fixture = _fixture( kind )
-        assert ( fixture[ "case_id" ], fixture[ "actual_text" ], fixture[ "model" ] ) == ( case[ "id" ], case[ "actual_text" ], DEFAULT_MODEL )
+        assert ( fixture[ "case_id" ], fixture[ "actual_text" ], fixture[ "model" ] ) == ( case[ "id" ], case[ "actual_text" ], judge_model() )
         recorded = { side: record[ "predicted_text" ] for side, record in fixture[ "sides" ].items() }
         assert recorded == { side: case[ key ] for side, key, _ in capture.SIDES if key in case }
 
