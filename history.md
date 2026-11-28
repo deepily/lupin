@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.27 - Session b2013c72 (Cheech 🌿, build manager, crew of 9, overnight) | Gold labels frozen, judge validation lanes 1 to 7 landed, truth labels on 355 pairs, batch amendment
+
+All merged on the working branch and pushed at 23:00 on Rick's word.
+- Gold page fix (9b1d76ac9). Gold labels frozen at projects-data/lupin/principle-learner/gold/2026-11-27/; the held-back slice is 257 items (row 05ea77a8 done).
+- Judge validation crew, row d05b85be. Each landing had unit and census green and Chloé's approval.
+  - Lanes 1, 2, 3 and 6 landed at f8b90a51d.
+  - Lane 5, the principle store speed fix, landed at cd8b0a6e9 (row 83707ad2 done).
+  - Lane 1's stance change, the doc-metrics page and the pair_page wiki section landed at 350e88469.
+  - Lane 7, the re-score statistics, landed at 2f64395bf; Sam's 31 reuse lines at cbe24aa33, where the reuse gate passes.
+- Draw pool pool-v4 (14,003 pairs, held-back cards removed). Reader truth labels are frozen on yes/no/neither 120 and multiple choice 80. Open-ended 80 and batch 75 are labelling now. No pair has been judged yet.
+- Rick's rulings came before any open or batch label existed. He adopted his outside expert's plan, with batch as a 75-pair census. The 30 floor counts pairs, with card counts reported. Yes/no/neither results cover yes answers only. The expert's problem statement: io/tmp/2026.11.27-batch-judge-validation-problem-statement.md.
+- Meaning labeller (Mr. Radio's row 457ade65) scored on the held-back slice: kappa 0.920 untuned, 0.937 tuned (second look).
+- Files: history.md, .claude-session.md; code through the merges above.
+
 ## 2026.11.25 - Session 5078edf7 (Cheech 🌿, build manager, skeleton crew, no seats) | Principle learner status report, wiki rollups merged, duplicate check ruled, Rick's two rows chased
 
 - Status report on the principle learner for Rick's broadcast 509a86e5, with a podcast: io/tmp/2026.11.25-principle-learner-status-cheech.md (not in git). Of 10 experiment phases, 3 are done, 1 is in progress and 6 wait, one behind the other, on Rick's gold-page export.
