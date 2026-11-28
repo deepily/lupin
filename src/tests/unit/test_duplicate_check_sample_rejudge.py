@@ -99,6 +99,86 @@ def test_estimate_has_no_interval_from_one_definition_and_no_rate_from_none():
     with pytest.raises( ValueError, match="no pair verdict" ): sr.estimate( 0, 0, {} )
 
 
+# Known answers for the weighted and stratified estimator, worked by hand. Each literal below is arithmetic on the planted pairs, not output of the code.
+# Stratum A has weight 2 and units a1 (k=2, d=1) and a2 (k=2, d=0). Stratum B has weight 5 and units b1 (k=1, d=1) and b2 (k=3, d=-1).
+TWO_STRATA = { "a1": [ ( 0, 1 ), ( 0, 0 ) ], "a2": [ ( 1, 1 ), ( 0, 0 ) ], "b1": [ ( 0, 1 ) ], "b2": [ ( 1, 0 ), ( 0, 0 ), ( 0, 0 ) ] }
+WEIGHTS    = { "a1": 2, "a2": 2, "b1": 5, "b2": 5 }
+STRATA     = { "a1": "A", "a2": "A", "b1": "B", "b2": "B" }
+
+
+def test_weights_of_one_give_the_unweighted_answer_and_its_hand_computed_interval():
+    by     = { "d1": [ ( 0, 0 ), ( 1, 1 ), ( 0, 1 ) ], "d2": [ ( 0, 0 ), ( 0, 0 ) ], "d3": [ ( 1, 0 ) ], "d4": [ ( 0, 1 ), ( 0, 0 ), ( 0, 0 ) ] }
+    plain  = sr.estimate( 1000, 100, by, z=0.1 )
+    ones   = sr.estimate( 1000, 100, by, z=0.1, weights={ i: 1 for i in by }, strata={ i: "only" for i in by } )
+    assert ones == plain
+    # gap 1/9; squared residuals sum to 176/81; gap variance (176/81) / (3*4*(9/4)**2) = 0.0357664; plus 0.1*0.9/1000; standard error 0.189358
+    assert ones[ "rate" ] == pytest.approx( 0.2111111, abs=1e-6 )
+    assert ( ones[ "low" ], ones[ "high" ] ) == ( pytest.approx( 0.192175, abs=1e-5 ), pytest.approx( 0.230047, abs=1e-5 ) )
+
+
+def test_the_planted_two_stratum_case_gives_the_hand_computed_weighted_answer():
+    got = sr.estimate( 1000, 100, TWO_STRATA, z=0.1, weights=WEIGHTS, strata=STRATA )
+    # weighted pair count 2*2+2*2+5*1+5*3 = 28; weighted differences 2+0+5-5 = 2; gap 2/28
+    assert ( got[ "definitions" ], got[ "pairs" ] ) == ( 4, 8 )
+    assert got[ "gap" ] == pytest.approx( 1 / 14 ) and got[ "rate" ] == pytest.approx( 0.1 + 1 / 14 )
+    assert got[ "sample_interim_rate" ] == pytest.approx( 7 / 28 ) and got[ "reference_rate" ] == pytest.approx( 9 / 28 )
+    # residuals times 14 are 24, -4 (A) and 65, -85 (B); inside-stratum sum 2*392 + 2*11250 = 23284, over 196*784; standard error 0.389378
+    assert ( got[ "low" ], got[ "high" ] ) == ( pytest.approx( 0.132491, abs=1e-5 ), pytest.approx( 0.210366, abs=1e-5 ) )
+
+
+def test_weights_without_strata_take_the_spread_over_all_units_together():
+    got = sr.estimate( 1000, 100, TWO_STRATA, z=0.1, weights=WEIGHTS )
+    # same point; squared residuals sum to 12042/196, times 4/3, over 784; standard error 0.323384
+    assert got[ "rate" ] == pytest.approx( 0.1 + 1 / 14 )
+    assert ( got[ "low" ], got[ "high" ] ) == ( pytest.approx( 0.139090, abs=1e-5 ), pytest.approx( 0.203767, abs=1e-5 ) )
+
+
+def test_differences_use_their_own_population_variance_and_may_be_negative():
+    by  = { "c1": [ ( 0, 0 ) ], "c2": [ ( 1, 1 ) ], "c3": [ ( -1, 0 ) ], "c4": [ ( 0, 0 ) ] }
+    got = sr.estimate( 100, -10, by, z=1, total_squares=30 )
+    # population mean -0.1, variance (0.30 - 0.01) / 100; gap 1/4; gap variance (4/3 * 3/4) / 16 = 1/16; standard error 0.255734
+    assert got[ "interim_rate" ] == -0.1 and got[ "gap" ] == 0.25 and got[ "rate" ] == pytest.approx( 0.15 )
+    assert ( got[ "low" ], got[ "high" ] ) == ( pytest.approx( -0.105734, abs=1e-5 ), pytest.approx( 0.405734, abs=1e-5 ) )
+    wide = sr.estimate( 100, -10, by, z=10, total_squares=30 )
+    assert ( wide[ "low" ], wide[ "high" ] ) == ( -1.0, 1.0 )
+
+
+def test_total_squares_equal_to_the_count_matches_the_yes_or_no_form_inside_the_bounds():
+    flags = sr.estimate( 1000, 100, TWO_STRATA, z=0.1 )
+    same  = sr.estimate( 1000, 100, TWO_STRATA, z=0.1, total_squares=100 )
+    assert ( same[ "low" ], same[ "high" ] ) == ( pytest.approx( flags[ "low" ] ), pytest.approx( flags[ "high" ] ) )
+    flat = sr.estimate( 3, 0.3, { "a": [ ( 0, 0 ) ], "b": [ ( 0, 0 ) ] }, total_squares=0.03 )
+    assert flat[ "low" ] == pytest.approx( 0.1 ) and flat[ "high" ] == pytest.approx( 0.1 )
+
+
+def test_equal_differences_whose_rounding_makes_the_variance_negative_have_zero_spread():
+    # three differences of 0.1: in floating point the mean of the squares is a hair below the square of the mean
+    got = sr.estimate( 3, 0.1 + 0.1 + 0.1, { "a": [ ( 0, 0 ) ], "b": [ ( 0, 0 ) ] }, total_squares=sum( [ 0.1 * 0.1 ] * 3 ) )
+    assert got[ "low" ] == got[ "high" ] == pytest.approx( 0.1 )
+
+
+def test_a_unit_with_no_matched_pair_counts_toward_neither_the_units_nor_a_stratum():
+    got = sr.estimate( 1000, 100, { **TWO_STRATA, "c1": [ ( 0, 1 ) ], "c2": [] }, strata={ **STRATA, "c1": "C", "c2": "C" } )
+    assert ( got[ "definitions" ], got[ "pairs" ] ) == ( 5, 9 ) and got[ "low" ] is None and got[ "high" ] is None
+
+
+def test_a_stratum_with_one_unit_gives_a_point_and_no_interval():
+    got = sr.estimate( 1000, 100, TWO_STRATA, weights=WEIGHTS, strata={ **STRATA, "b2": "C" } )
+    assert got[ "rate" ] == pytest.approx( 0.1 + 1 / 14 ) and got[ "low" ] is None and got[ "high" ] is None
+
+
+@pytest.mark.parametrize( "kwargs, reason", [
+    ( { "weights": { "a1": 2 } },                    "weights leaves out" ),
+    ( { "strata": { "a1": "A" } },                   "strata leaves out" ),
+    ( { "weights": { **WEIGHTS, "b2": 0 } },         "above 0" ),
+    ( { "weights": { **WEIGHTS, "b2": float( "nan" ) } }, "above 0" ),
+    ( { "total_squares": 5 },                        "too small" ),
+    ( { "total_squares": float( "nan" ) },           "too small" ),
+] )
+def test_the_estimator_refuses_a_design_that_does_not_fit_the_sample( kwargs, reason ):
+    with pytest.raises( ValueError, match=reason ): sr.estimate( 1000, 100, TWO_STRATA, **kwargs )
+
+
 def test_render_a_plan_and_a_live_result():
     plan = sr.render( OPUS, FABLE, 30, 5, 2, ( 1000, 100, [ "r.json" ] ), { "r.json": [ "d-1", "d-2" ] } )
     assert "Sample of 2 definitions (asked for 30, seed 5, slot 2), from 1 run file(s)" in plan and "100 flagged (10.0%)" in plan

@@ -12,6 +12,10 @@ The first part comes from the `pairs` counts the daily check records in each res
 The gap is a ratio over whole definitions, because the pairs of one definition are not independent.
 The interval is 95 percent and normal, from the variance of the rate and the variance of the gap added.
 
+The estimate function also serves a sample drawn by stratum, which is stratified prediction-powered inference.
+Each sampled unit then carries a weight, the inverse of its chance of being drawn, and the name of its stratum.
+This command draws no strata, so it passes neither.
+
 Without --go the tool prints the sample and the plan and makes no model call.
 With --go it makes up to one call for each sampled definition, plus one more for each reply it has to ask for again.
 
@@ -86,39 +90,54 @@ def matched_pairs( first, second ):
     return by, len( set( a ) ^ set( b ) )
 
 
-def estimate( total_rows, total_flagged, by_definition, z=Z_95 ):
+def estimate( total_rows, total_flagged, by_definition, z=Z_95, weights=None, strata=None, total_squares=None ):
     """
-    Estimate the reference model's flag rate over the interim model's whole pair population.
+    Estimate the reference model's rate over the interim model's whole population.
 
     Requires:
-        - total_rows is above 0 and total_flagged is from 0 to total_rows; by_definition is matched_pairs' first answer
+        - total_rows is above 0; by_definition is matched_pairs' first answer, each pair being ( interim value, reference value )
+        - weights is None or maps every key of by_definition to a number above 0, the inverse of that unit's chance of being sampled
+        - strata is None or maps every key of by_definition to the name of the stratum it was drawn from
+        - without total_squares, total_flagged is a count from 0 to total_rows and the pair values are 0 or 1
+        - with total_squares, the values are differences from -1 to 1: total_flagged is the sum of the interim differences over the population and total_squares the sum of their squares
 
     Ensures:
         - returns { rate, gap, low, high, definitions, pairs, interim_rate, reference_rate, sample_interim_rate }
         - interim_rate is total_flagged / total_rows
-        - gap is the sum of ( reference - interim ) over the matched pairs, divided by their count
-        - rate is interim_rate + gap, and low and high are rate -/+ z standard errors, kept inside 0 to 1
-        - the variance is interim_rate * ( 1 - interim_rate ) / total_rows plus the cluster-ratio variance of the gap, which treats each definition as one unit
-        - with fewer than 2 definitions that have a matched pair, gap-variance cannot be estimated, so low and high are None
+        - gap is the weighted sum of ( reference - interim ) over the matched pairs, divided by the weighted count of those pairs; a unit's weight is 1 without weights
+        - sample_interim_rate and reference_rate are weighted the same way; definitions and pairs are plain counts of the units that have a matched pair and of their pairs
+        - rate is interim_rate + gap, and low and high are rate -/+ z standard errors, kept inside 0 to 1, or inside -1 to 1 with total_squares
+        - the variance is that of the interim values over total_rows plus the cluster-ratio variance of the gap, which treats each definition as one unit and, with strata, measures the spread inside each stratum
+        - with a stratum holding fewer than 2 definitions that have a matched pair, gap-variance cannot be estimated, so low and high are None
         - with no matched pair at all, rate and gap are None as well
 
     Raises:
-        - ValueError when total_rows is not above 0
+        - ValueError when total_rows is not above 0, when weights or strata leave out a definition, when a weight is not above 0, or when total_squares is not a number or too small for total_flagged
     """
     if total_rows <= 0: raise ValueError( "the interim model made no pair verdict in the runs with pair counts" )
+    for name, given in ( ( "weights", weights ), ( "strata", strata ) ):
+        if given is not None and set( by_definition ) - set( given ): raise ValueError( f"{name} leaves out: {sorted( set( by_definition ) - set( given ) )[ :5 ]}" )
+    if weights is not None and any( not weights[ i ] > 0 for i in by_definition ): raise ValueError( "every weight must be above 0" )
     interim = total_flagged / total_rows
-    units   = [ ( len( p ), sum( y - f for f, y in p ) ) for p in by_definition.values() ]
-    n       = sum( u[ 0 ] for u in units )
-    out     = { "definitions": len( units ), "pairs": n, "interim_rate": interim, "rate": None, "gap": None, "low": None, "high": None, "reference_rate": None, "sample_interim_rate": None }
-    if n == 0: return out
-    gap     = sum( u[ 1 ] for u in units ) / n
-    out.update( gap=gap, rate=interim + gap,
-                sample_interim_rate=sum( f for p in by_definition.values() for f, _ in p ) / n, reference_rate=sum( y for p in by_definition.values() for _, y in p ) / n )
-    m = len( units )
-    if m < 2: return out
-    gap_variance = sum( ( d - gap * k ) ** 2 for k, d in units ) / ( ( m - 1 ) * m * ( n / m ) ** 2 )
-    se           = math.sqrt( interim * ( 1 - interim ) / total_rows + gap_variance )
-    out.update( low=max( 0.0, out[ "rate" ] - z * se ), high=min( 1.0, out[ "rate" ] + z * se ) )
+    if total_squares is None: spread, floor = interim * ( 1 - interim ), 0.0
+    else:
+        spread, floor = total_squares / total_rows - interim * interim, -1.0
+        if not spread >= -1e-12: raise ValueError( "total_squares is too small for total_flagged" )
+        spread = max( 0.0, spread )
+    units = [ ( 1 if weights is None else weights[ i ], None if strata is None else strata[ i ], p ) for i, p in by_definition.items() if p ]
+    out   = { "definitions": len( units ), "pairs": sum( len( p ) for _, _, p in units ), "interim_rate": interim, "rate": None, "gap": None, "low": None, "high": None, "reference_rate": None, "sample_interim_rate": None }
+    if out[ "pairs" ] == 0: return out
+    size  = sum( w * len( p ) for w, _, p in units )
+    first = sum( w * f for w, _, p in units for f, _ in p ) / size
+    last  = sum( w * y for w, _, p in units for _, y in p ) / size
+    gap   = sum( w * sum( y - f for f, y in p ) for w, _, p in units ) / size
+    out.update( gap=gap, rate=interim + gap, sample_interim_rate=first, reference_rate=last )
+    residuals = {}
+    for w, stratum, p in units: residuals.setdefault( stratum, [] ).append( w * ( sum( y - f for f, y in p ) - gap * len( p ) ) )
+    if any( len( r ) < 2 for r in residuals.values() ): return out
+    gap_variance = sum( len( r ) / ( len( r ) - 1 ) * sum( ( e - sum( r ) / len( r ) ) ** 2 for e in r ) for r in residuals.values() ) / size ** 2
+    se           = math.sqrt( spread / total_rows + gap_variance )
+    out.update( low=max( floor, out[ "rate" ] - z * se ), high=min( 1.0, out[ "rate" ] + z * se ) )
     return out
 
 
